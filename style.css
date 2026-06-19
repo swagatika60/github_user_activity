@@ -116,3 +116,25 @@ h2 {
     from { opacity: 0; transform: translateY(5px); }
     to { opacity: 1; transform: translateY(0); }
 }
+
+/* Style for the repository links */
+.repo-link {
+    color: #58a6ff; /* GitHub link blue */
+    text-decoration: none;
+    font-weight: 600;
+    transition: text-decoration 0.1s ease;
+}
+
+.repo-link:hover {
+    text-decoration: underline; /* Underline when hovering */
+}
+
+/* Inline code style for branch names */
+code {
+    background-color: rgba(110, 118, 129, 0.4);
+    padding: 2px 6px;
+    border-radius: 6px;
+    font-family: monospace;
+    font-size: 0.85rem;
+    color: #ff7b72; /* Subtle red/orange for code text */
+}
