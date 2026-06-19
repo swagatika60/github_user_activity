@@ -55,29 +55,38 @@ async function getActivity() {
 
         events.slice(0, 10).forEach(event => {
             let message = "";
+switch (event.type) {
+    case "PushEvent":
+        // Get the branch name being pushed to (e.g., "refs/heads/main" -> "main")
+        const branchRef = event.payload.ref || "";
+        const branchName = branchRef.replace("refs/heads/", "");
+        
+        // Dynamic clean message matching GitHub's updated API specs
+        if (branchName) {
+            message = `📌 Pushed updates to the <code>${branchName}</code> branch in <strong>${event.repo.name}</strong>`;
+        } else {
+            message = `📌 Pushed code updates to <strong>${event.repo.name}</strong>`;
+        }
+        break;
 
-            switch (event.type) {
-                case "PushEvent":
-                    // FIX: Safely check if commits exist before reading .length
-                    const commitCount = event.payload && event.payload.commits ? event.payload.commits.length : 0;
-                    message = `📌 Pushed ${commitCount} commit(s) to ${event.repo.name}`;
-                    break;
+    case "WatchEvent":
+        message = `⭐ Starred <strong>${event.repo.name}</strong>`;
+        break;
 
-                case "WatchEvent":
-                    message = `⭐ Starred ${event.repo.name}`;
-                    break;
+    case "ForkEvent":
+        message = `🍴 Forked <strong>${event.repo.name}</strong>`;
+        break;
 
-                case "ForkEvent":
-                    message = `🍴 Forked ${event.repo.name}`;
-                    break;
+    case "CreateEvent":
+        message = `✨ Created a new ${event.payload.ref_type || 'repository'} in <strong>${event.repo.name}</strong>`;
+        break;
 
-                case "CreateEvent":
-                    message = `✨ Created ${event.payload.ref_type || 'something'} in ${event.repo.name}`;
-                    break;
+    default:
+        // Cleans up camelCase text (e.g., "IssueCommentEvent" becomes "Issue Comment Event")
+        const cleanEventName = event.type.replace(/([A-Z])/g, ' $1').trim();
+        message = `🔹 ${cleanEventName} on <strong>${event.repo.name}</strong>`;
+}
 
-                default:
-                    message = `🔹 ${event.type} on ${event.repo.name}`;
-            }
 
             output += `<div class="activity">${message}</div>`;
         });
