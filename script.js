@@ -94,7 +94,9 @@ switch (event.type) {
         result.innerHTML = output;
 
     } catch (error) {
-        result.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
+
+        result.innerHTML = `<p style="color: red;"> Error: ${error.message}</p>`;
+
     }
 }
 
