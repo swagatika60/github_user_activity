@@ -1,27 +1,13 @@
-// const result = document.querySelector(".container")
-
-// result.addEventListener ('search', e  =>{
-// function getActivity(){
-//     let name = document.getElementById("username").value;
-
-//     document.getElementById("output").textContent = name;
-// }
-
-// const getData = async () => {
-//     const response = await fetch('swag.json')
-//      console.log(response)
-//     const data = await response.json()
-//     return data
-
-//     if(response.status !== 200){
-//         throw new Error('Error fetching todos')
-//     }
-// }
-
-// getData() 
-// .then(data =>console.log("resolved",data))
-// .catch(err => console.log("rejected",err.message))
-
+document.addEventListener("DOMContentLoaded", () => {
+    const usernameInput = document.getElementById("username");
+    if (usernameInput) {
+        usernameInput.addEventListener("keypress", (event) => {
+            if (event.key === "Enter") {
+                getActivity();
+            }
+        });
+    }
+});
 
 async function getActivity() {
     const username = document.getElementById("username").value;
