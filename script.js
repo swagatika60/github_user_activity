@@ -1,87 +1,94 @@
+const HISTORY_KEY = "github-viewer-history";
+const MAX_HISTORY = 8;
+
 document.addEventListener("DOMContentLoaded", () => {
-    const usernameInput = document.getElementById("username");
-    if (!usernameInput) return;
+    const input = document.getElementById("username");
+    const searchBtn = document.getElementById("search-btn");
+    const clearHistoryBtn = document.getElementById("clear-history");
 
-    usernameInput.addEventListener("keypress", (event) => {
-        if (event.key === "Enter") {
-            getActivity();
-        }
+    searchBtn.addEventListener("click", getActivity);
+    input.addEventListener("keypress", (event) => {
+        if (event.key === "Enter") getActivity();
     });
+    input.addEventListener("paste", () => setTimeout(getActivity, 0));
+    clearHistoryBtn.addEventListener("click", clearHistory);
 
-    usernameInput.addEventListener("paste", () => {
-        setTimeout(getActivity, 0);
-    });
+    renderHistory();
+    checkHealth();
 });
 
-function parseGitHubInput(input) {
-    const trimmed = input.trim().replace(/^@/, "");
+async function checkHealth() {
+    const statusEl = document.getElementById("api-status");
+    const dot = statusEl.querySelector(".status-dot");
+    const text = statusEl.querySelector(".status-text");
 
-    if (!trimmed) {
-        return { type: "empty" };
-    }
-
-    const looksLikeUrl =
-        trimmed.includes("github.com") ||
-        trimmed.startsWith("http://") ||
-        trimmed.startsWith("https://");
-
-    if (!looksLikeUrl) {
-        return { type: "username", username: trimmed };
-    }
-
-    let url;
     try {
-        url = new URL(trimmed.startsWith("http") ? trimmed : `https://${trimmed}`);
+        const response = await fetch("/api/health");
+        if (!response.ok) throw new Error("offline");
+        const data = await response.json();
+        dot.classList.add("online");
+        text.textContent = data.githubToken ? "API connected (token active)" : "API connected";
     } catch {
-        return { type: "invalid" };
+        dot.classList.add("offline");
+        text.textContent = "Backend offline — run npm start";
     }
-
-    const host = url.hostname.replace(/^www\./, "");
-    if (host !== "github.com") {
-        return { type: "invalid" };
-    }
-
-    const parts = url.pathname.split("/").filter(Boolean);
-    if (parts.length === 0) {
-        return { type: "invalid" };
-    }
-
-    const [owner, repo, section, id] = parts;
-
-    if (parts.length === 1) {
-        return { type: "user", owner };
-    }
-
-    if (parts.length === 2) {
-        return { type: "repo", owner, repo };
-    }
-
-    if (section === "issues" && id && /^\d+$/.test(id)) {
-        return { type: "issue", owner, repo, number: id };
-    }
-
-    if (section === "pull" && id && /^\d+$/.test(id)) {
-        return { type: "pull", owner, repo, number: id };
-    }
-
-    if (parts.length === 2) {
-        return { type: "repo", owner, repo };
-    }
-
-    return { type: "repo", owner, repo };
 }
 
-async function fetchGitHub(path) {
-    const response = await fetch(`https://api.github.com${path}`);
+function getHistory() {
+    try {
+        return JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+    } catch {
+        return [];
+    }
+}
 
-    if (!response.ok) {
-        if (response.status === 404) {
-            throw new Error("Resource not found");
-        }
-        throw new Error("Error fetching data from GitHub");
+function saveHistory(query) {
+    const trimmed = query.trim();
+    if (!trimmed) return;
+
+    const history = getHistory().filter((item) => item !== trimmed);
+    history.unshift(trimmed);
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(0, MAX_HISTORY)));
+    renderHistory();
+}
+
+function clearHistory() {
+    localStorage.removeItem(HISTORY_KEY);
+    renderHistory();
+}
+
+function renderHistory() {
+    const history = getHistory();
+    const section = document.getElementById("history-section");
+    const list = document.getElementById("history-list");
+
+    if (history.length === 0) {
+        section.hidden = true;
+        return;
     }
 
-    return response.json();
+    section.hidden = false;
+    list.innerHTML = history
+        .map(
+            (item) =>
+                `<button type="button" class="history-item" data-query="${escapeHtml(item)}">${escapeHtml(item)}</button>`
+        )
+        .join("");
+
+    list.querySelectorAll(".history-item").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            document.getElementById("username").value = btn.dataset.query;
+            getActivity();
+        });
+    });
+}
+
+function escapeHtml(text) {
+    return String(text)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
 }
 
 function formatDate(dateString) {
@@ -93,19 +100,20 @@ function formatDate(dateString) {
     });
 }
 
+function timeAgo(dateString) {
+    if (!dateString) return "";
+    const seconds = Math.floor((Date.now() - new Date(dateString)) / 1000);
+    if (seconds < 60) return "just now";
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+    return `${Math.floor(seconds / 86400)}d ago`;
+}
+
 function truncateText(text, maxLength = 280) {
     if (!text) return "No description provided.";
     const cleaned = text.trim();
     if (cleaned.length <= maxLength) return cleaned;
     return `${cleaned.slice(0, maxLength).trim()}…`;
-}
-
-function escapeHtml(text) {
-    return String(text)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;");
 }
 
 function renderStat(label, value) {
@@ -116,39 +124,90 @@ function renderDetailRow(label, value) {
     return `<div class="detail-row"><span class="detail-label">${label}</span><span class="detail-value">${value}</span></div>`;
 }
 
-async function describeUser(owner) {
-    const user = await fetchGitHub(`/users/${owner}`);
-    const events = await fetchGitHub(`/users/${owner}/events?per_page=5`);
+function renderMetaBanner(cached, rateLimit) {
+    const parts = [];
+    if (cached) parts.push("Cached result");
+    if (rateLimit?.remaining != null) {
+        parts.push(`${rateLimit.remaining} API calls left`);
+    }
+    if (parts.length === 0) return "";
+    return `<div class="meta-banner">${parts.join(" · ")}</div>`;
+}
 
-    const profileUrl = user.html_url;
-    const avatar = user.avatar_url
-        ? `<img src="${user.avatar_url}" alt="${escapeHtml(user.login)}" class="avatar">`
-        : "";
+function updateRateLimitFooter(rateLimit) {
+    const el = document.getElementById("rate-limit-info");
+    if (!rateLimit?.remaining) {
+        el.textContent = "";
+        return;
+    }
+    el.textContent = `Rate limit: ${rateLimit.remaining}/${rateLimit.limit}`;
+}
 
-    let activityHtml = "";
-    if (events.length === 0) {
-        activityHtml = '<div class="message">No recent public activity.</div>';
-    } else {
-        activityHtml = events
-            .map((event) => {
-                const repoUrl = `https://github.com/${event.repo.name}`;
-                const repoLink = `<a href="${repoUrl}" target="_blank" class="repo-link">${event.repo.name}</a>`;
-                const cleanEventName = event.type.replace(/Event$/, "").replace(/([A-Z])/g, " $1").trim();
-                return `<div class="activity compact">${cleanEventName} on ${repoLink}</div>`;
-            })
-            .join("");
+function formatActivityMessage(event) {
+    const repoUrl = `https://github.com/${event.repo.name}`;
+    const repoLink = `<a href="${repoUrl}" target="_blank" rel="noopener" class="repo-link">${event.repo.name}</a>`;
+    const ago = timeAgo(event.created_at);
+
+    switch (event.type) {
+        case "PushEvent": {
+            const branchName = (event.payload.ref || "").replace("refs/heads/", "");
+            const msg = branchName
+                ? `Pushed to <code>${escapeHtml(branchName)}</code> in ${repoLink}`
+                : `Pushed code to ${repoLink}`;
+            return { icon: "push", message: msg, ago };
+        }
+        case "WatchEvent":
+            return { icon: "star", message: `Starred ${repoLink}`, ago };
+        case "ForkEvent":
+            return { icon: "fork", message: `Forked ${repoLink}`, ago };
+        case "CreateEvent":
+            return {
+                icon: "create",
+                message: `Created ${escapeHtml(event.payload.ref_type || "repository")} in ${repoLink}`,
+                ago,
+            };
+        default: {
+            const name = event.type.replace(/Event$/, "").replace(/([A-Z])/g, " $1").trim();
+            return { icon: "default", message: `${name} on ${repoLink}`, ago };
+        }
+    }
+}
+
+function renderActivityList(events, title) {
+    if (!events.length) {
+        return `<h2 class="section-title">${title}</h2><div class="empty-state">No recent activity found.</div>`;
     }
 
+    const items = events
+        .map(({ icon, message, ago }) => {
+            return `
+                <article class="activity-item activity-${icon}">
+                    <div class="activity-content">${message}</div>
+                    <time class="activity-time">${ago}</time>
+                </article>`;
+        })
+        .join("");
+
+    return `<h2 class="section-title">${title}</h2><div class="activity-list">${items}</div>`;
+}
+
+function renderUser(data) {
+    const user = data.profile;
+    const profileUrl = user.html_url;
+
+    const events = data.events.map(formatActivityMessage);
+
     return `
-        <div class="detail-card">
+        ${renderMetaBanner(data.cached, data.rateLimit)}
+        <div class="detail-card hero-card">
             <div class="profile-header">
-                ${avatar}
-                <div>
+                <img src="${user.avatar_url}" alt="${escapeHtml(user.login)}" class="avatar">
+                <div class="profile-info">
                     <h2>${escapeHtml(user.name || user.login)}</h2>
-                    <a href="${profileUrl}" target="_blank" class="repo-link">@${escapeHtml(user.login)}</a>
+                    <a href="${profileUrl}" target="_blank" rel="noopener" class="repo-link">@${escapeHtml(user.login)}</a>
+                    <p class="detail-description">${escapeHtml(truncateText(user.bio, 400))}</p>
                 </div>
             </div>
-            <p class="detail-description">${escapeHtml(truncateText(user.bio, 400))}</p>
             <div class="stats-grid">
                 ${renderStat("Repos", user.public_repos)}
                 ${renderStat("Followers", user.followers)}
@@ -158,39 +217,39 @@ async function describeUser(owner) {
             ${renderDetailRow("Company", escapeHtml(user.company || "—"))}
             ${renderDetailRow("Location", escapeHtml(user.location || "—"))}
             ${renderDetailRow("Joined", formatDate(user.created_at))}
-            ${renderDetailRow("Profile", `<a href="${profileUrl}" target="_blank" class="repo-link">${profileUrl}</a>`)}
+            ${renderDetailRow("Profile", `<a href="${profileUrl}" target="_blank" rel="noopener" class="repo-link">${profileUrl}</a>`)}
         </div>
-        <h3 class="section-title">Recent Activity</h3>
-        ${activityHtml}
+        ${renderActivityList(events, "Recent Activity")}
     `;
 }
 
-async function describeRepo(owner, repo) {
-    const data = await fetchGitHub(`/repos/${owner}/${repo}`);
-    const repoUrl = data.html_url;
-
+function renderRepo(data) {
+    const repo = data.repo;
     const topics =
-        data.topics && data.topics.length > 0
-            ? data.topics.map((topic) => `<span class="topic-tag">${escapeHtml(topic)}</span>`).join("")
-            : '<span class="detail-muted">No topics listed</span>';
+        repo.topics?.length > 0
+            ? repo.topics.map((t) => `<span class="topic-tag">${escapeHtml(t)}</span>`).join("")
+            : '<span class="detail-muted">No topics</span>';
 
     return `
+        ${renderMetaBanner(data.cached, data.rateLimit)}
         <div class="detail-card">
-            <h2>${escapeHtml(data.full_name)}</h2>
-            <p class="detail-description">${escapeHtml(truncateText(data.description, 400))}</p>
-            <div class="stats-grid">
-                ${renderStat("Stars", data.stargazers_count)}
-                ${renderStat("Forks", data.forks_count)}
-                ${renderStat("Issues", data.open_issues_count)}
-                ${renderStat("Watchers", data.subscribers_count || data.watchers_count)}
+            <div class="card-top">
+                <span class="type-badge">Repository</span>
+                <h2>${escapeHtml(repo.full_name)}</h2>
             </div>
-            ${renderDetailRow("Language", escapeHtml(data.language || "Not detected"))}
-            ${renderDetailRow("Default branch", `<code>${escapeHtml(data.default_branch)}</code>`)}
-            ${renderDetailRow("License", escapeHtml(data.license?.spdx_id || data.license?.name || "None"))}
-            ${renderDetailRow("Created", formatDate(data.created_at))}
-            ${renderDetailRow("Last updated", formatDate(data.updated_at))}
-            ${renderDetailRow("Homepage", data.homepage ? `<a href="${data.homepage}" target="_blank" class="repo-link">${escapeHtml(data.homepage)}</a>` : "—")}
-            ${renderDetailRow("Repository", `<a href="${repoUrl}" target="_blank" class="repo-link">${repoUrl}</a>`)}
+            <p class="detail-description">${escapeHtml(truncateText(repo.description, 400))}</p>
+            <div class="stats-grid">
+                ${renderStat("Stars", repo.stargazers_count)}
+                ${renderStat("Forks", repo.forks_count)}
+                ${renderStat("Issues", repo.open_issues_count)}
+                ${renderStat("Watchers", repo.subscribers_count || repo.watchers_count)}
+            </div>
+            ${renderDetailRow("Language", escapeHtml(repo.language || "Not detected"))}
+            ${renderDetailRow("Branch", `<code>${escapeHtml(repo.default_branch)}</code>`)}
+            ${renderDetailRow("License", escapeHtml(repo.license?.spdx_id || repo.license?.name || "None"))}
+            ${renderDetailRow("Created", formatDate(repo.created_at))}
+            ${renderDetailRow("Updated", formatDate(repo.updated_at))}
+            ${renderDetailRow("Link", `<a href="${repo.html_url}" target="_blank" rel="noopener" class="repo-link">${repo.html_url}</a>`)}
             <div class="detail-row topics-row">
                 <span class="detail-label">Topics</span>
                 <span class="detail-value topic-list">${topics}</span>
@@ -199,28 +258,31 @@ async function describeRepo(owner, repo) {
     `;
 }
 
-async function describeIssue(owner, repo, number) {
-    const data = await fetchGitHub(`/repos/${owner}/${repo}/issues/${number}`);
-    const issueUrl = data.html_url;
+function renderIssue(data) {
+    const issue = data.issue;
+
     const labels =
-        data.labels && data.labels.length > 0
-            ? data.labels.map((label) => `<span class="label-tag">${escapeHtml(label.name)}</span>`).join("")
+        issue.labels?.length > 0
+            ? issue.labels.map((l) => `<span class="label-tag">${escapeHtml(l.name)}</span>`).join("")
             : '<span class="detail-muted">No labels</span>';
 
     return `
+        ${renderMetaBanner(data.cached, data.rateLimit)}
         <div class="detail-card">
-            <span class="badge badge-${data.state}">${escapeHtml(data.state)}</span>
-            <h2>#${data.number} ${escapeHtml(data.title)}</h2>
-            <p class="detail-meta">Opened by <a href="${data.user.html_url}" target="_blank" class="repo-link">${escapeHtml(data.user.login)}</a> on ${formatDate(data.created_at)}</p>
-            <p class="detail-description">${escapeHtml(truncateText(data.body, 500))}</p>
-            <div class="stats-grid">
-                ${renderStat("Comments", data.comments)}
-                ${renderStat("Assignees", data.assignees?.length || 0)}
+            <div class="card-top">
+                <span class="badge badge-${issue.state}">${escapeHtml(issue.state)}</span>
+                <span class="type-badge">Issue</span>
             </div>
-            ${renderDetailRow("Repository", `<a href="https://github.com/${owner}/${repo}" target="_blank" class="repo-link">${owner}/${repo}</a>`)}
-            ${renderDetailRow("Updated", formatDate(data.updated_at))}
-            ${renderDetailRow("Closed", data.closed_at ? formatDate(data.closed_at) : "Still open")}
-            ${renderDetailRow("Issue link", `<a href="${issueUrl}" target="_blank" class="repo-link">${issueUrl}</a>`)}
+            <h2>#${issue.number} ${escapeHtml(issue.title)}</h2>
+            <p class="detail-meta">By <a href="${issue.user.html_url}" target="_blank" rel="noopener" class="repo-link">${escapeHtml(issue.user.login)}</a> · ${formatDate(issue.created_at)}</p>
+            <p class="detail-description">${escapeHtml(truncateText(issue.body, 500))}</p>
+            <div class="stats-grid stats-grid-2">
+                ${renderStat("Comments", issue.comments)}
+                ${renderStat("Assignees", issue.assignees?.length || 0)}
+            </div>
+            ${renderDetailRow("Updated", formatDate(issue.updated_at))}
+            ${renderDetailRow("Closed", issue.closed_at ? formatDate(issue.closed_at) : "Open")}
+            ${renderDetailRow("Link", `<a href="${issue.html_url}" target="_blank" rel="noopener" class="repo-link">${issue.html_url}</a>`)}
             <div class="detail-row topics-row">
                 <span class="detail-label">Labels</span>
                 <span class="detail-value topic-list">${labels}</span>
@@ -229,37 +291,34 @@ async function describeIssue(owner, repo, number) {
     `;
 }
 
-async function describePull(owner, repo, number) {
-    const data = await fetchGitHub(`/repos/${owner}/${repo}/pulls/${number}`);
-    const pullUrl = data.html_url;
+function renderPull(data) {
+    const pull = data.pull;
+    const state = pull.merged ? "merged" : pull.state;
+
     const labels =
-        data.labels && data.labels.length > 0
-            ? data.labels.map((label) => `<span class="label-tag">${escapeHtml(label.name)}</span>`).join("")
+        pull.labels?.length > 0
+            ? pull.labels.map((l) => `<span class="label-tag">${escapeHtml(l.name)}</span>`).join("")
             : '<span class="detail-muted">No labels</span>';
 
-    const mergeStatus = data.merged
-        ? `Merged on ${formatDate(data.merged_at)}`
-        : data.state === "closed"
-          ? "Closed without merge"
-          : "Open";
-
     return `
+        ${renderMetaBanner(data.cached, data.rateLimit)}
         <div class="detail-card">
-            <span class="badge badge-${data.merged ? "merged" : data.state}">${data.merged ? "merged" : escapeHtml(data.state)}</span>
-            <h2>#${data.number} ${escapeHtml(data.title)}</h2>
-            <p class="detail-meta">Opened by <a href="${data.user.html_url}" target="_blank" class="repo-link">${escapeHtml(data.user.login)}</a> on ${formatDate(data.created_at)}</p>
-            <p class="detail-description">${escapeHtml(truncateText(data.body, 500))}</p>
-            <div class="stats-grid">
-                ${renderStat("Commits", data.commits ?? "—")}
-                ${renderStat("+Additions", data.additions ?? "—")}
-                ${renderStat("−Deletions", data.deletions ?? "—")}
-                ${renderStat("Changed files", data.changed_files ?? "—")}
+            <div class="card-top">
+                <span class="badge badge-${state}">${state}</span>
+                <span class="type-badge">Pull Request</span>
             </div>
-            ${renderDetailRow("Base branch", `<code>${escapeHtml(data.base.ref)}</code> ← ${escapeHtml(data.base.repo.full_name)}`)}
-            ${renderDetailRow("Head branch", `<code>${escapeHtml(data.head.ref)}</code> ← ${escapeHtml(data.head.repo.full_name)}`)}
-            ${renderDetailRow("Merge status", mergeStatus)}
-            ${renderDetailRow("Repository", `<a href="https://github.com/${owner}/${repo}" target="_blank" class="repo-link">${owner}/${repo}</a>`)}
-            ${renderDetailRow("Pull request", `<a href="${pullUrl}" target="_blank" class="repo-link">${pullUrl}</a>`)}
+            <h2>#${pull.number} ${escapeHtml(pull.title)}</h2>
+            <p class="detail-meta">By <a href="${pull.user.html_url}" target="_blank" rel="noopener" class="repo-link">${escapeHtml(pull.user.login)}</a> · ${formatDate(pull.created_at)}</p>
+            <p class="detail-description">${escapeHtml(truncateText(pull.body, 500))}</p>
+            <div class="stats-grid">
+                ${renderStat("+Lines", pull.additions ?? "—")}
+                ${renderStat("−Lines", pull.deletions ?? "—")}
+                ${renderStat("Files", pull.changed_files ?? "—")}
+                ${renderStat("Commits", pull.commits ?? "—")}
+            </div>
+            ${renderDetailRow("Base", `<code>${escapeHtml(pull.base.ref)}</code>`)}
+            ${renderDetailRow("Head", `<code>${escapeHtml(pull.head.ref)}</code>`)}
+            ${renderDetailRow("Link", `<a href="${pull.html_url}" target="_blank" rel="noopener" class="repo-link">${pull.html_url}</a>`)}
             <div class="detail-row topics-row">
                 <span class="detail-label">Labels</span>
                 <span class="detail-value topic-list">${labels}</span>
@@ -268,90 +327,105 @@ async function describePull(owner, repo, number) {
     `;
 }
 
-function formatActivityMessage(event) {
-    const repoUrl = `https://github.com/${event.repo.name}`;
-    const repoLink = `<a href="${repoUrl}" target="_blank" class="repo-link">${event.repo.name}</a>`;
+function renderCommit(data) {
+    const commit = data.commit;
+    const message = commit.commit.message.split("\n")[0];
+    const fullName = `${data.owner}/${data.repo}`;
+    const authorLink = commit.author?.html_url
+        ? `<a href="${commit.author.html_url}" target="_blank" rel="noopener" class="repo-link">${escapeHtml(commit.commit.author.name)}</a>`
+        : escapeHtml(commit.commit.author.name);
 
-    switch (event.type) {
-        case "PushEvent": {
-            const branchRef = event.payload.ref || "";
-            const branchName = branchRef.replace("refs/heads/", "");
-            if (branchName) {
-                return `📌 Pushed updates to the <code>${branchName}</code> branch in ${repoLink}`;
-            }
-            return `📌 Pushed code updates to ${repoLink}`;
-        }
-        case "WatchEvent":
-            return `⭐ Starred ${repoLink}`;
-        case "ForkEvent":
-            return `🍴 Forked ${repoLink}`;
-        case "CreateEvent":
-            return `✨ Created a new ${event.payload.ref_type || "repository"} in ${repoLink}`;
-        default: {
-            const cleanEventName = event.type.replace(/([A-Z])/g, " $1").trim();
-            return `🔹 ${cleanEventName} on ${repoLink}`;
-        }
-    }
+    return `
+        ${renderMetaBanner(data.cached, data.rateLimit)}
+        <div class="detail-card">
+            <div class="card-top">
+                <span class="type-badge">Commit</span>
+                <code class="sha-badge">${escapeHtml(commit.sha.slice(0, 7))}</code>
+            </div>
+            <h2>${escapeHtml(message)}</h2>
+            <p class="detail-meta">By ${authorLink} · ${formatDate(commit.commit.author.date)}</p>
+            <div class="stats-grid stats-grid-2">
+                ${renderStat("Additions", commit.stats?.additions ?? "—")}
+                ${renderStat("Deletions", commit.stats?.deletions ?? "—")}
+            </div>
+            ${renderDetailRow("Repository", `<a href="https://github.com/${fullName}" target="_blank" rel="noopener" class="repo-link">${fullName}</a>`)}
+            ${renderDetailRow("Full SHA", `<code>${escapeHtml(commit.sha)}</code>`)}
+            ${renderDetailRow("Link", `<a href="${commit.html_url}" target="_blank" rel="noopener" class="repo-link">${commit.html_url}</a>`)}
+        </div>
+    `;
 }
 
-async function showUserActivity(username) {
-    const events = await fetchGitHub(`/users/${username}/events`);
+function renderActivity(data) {
+    const events = data.events.map(formatActivityMessage);
+    return `
+        ${renderMetaBanner(data.cached, data.rateLimit)}
+        ${renderActivityList(events, `Recent Activity · @${escapeHtml(data.username)}`)}
+    `;
+}
 
-    if (events.length === 0) {
-        return '<h2>Recent Activity</h2><div class="message">No recent activity found for this user.</div>';
-    }
+function showLoading() {
+    document.getElementById("output").innerHTML = `
+        <div class="loading-state">
+            <div class="spinner"></div>
+            <p>Fetching from GitHub...</p>
+        </div>`;
+}
 
-    let output = `<h2>Recent Activity for @${escapeHtml(username)}</h2>`;
-    events.slice(0, 10).forEach((event) => {
-        output += `<div class="activity">${formatActivityMessage(event)}</div>`;
-    });
-
-    return output;
+function showError(message) {
+    document.getElementById("output").innerHTML = `<div class="error-message">${escapeHtml(message)}</div>`;
 }
 
 async function getActivity() {
-    const input = document.getElementById("username").value;
-    const result = document.getElementById("output");
-    const parsed = parseGitHubInput(input);
+    const input = document.getElementById("username").value.trim();
+    const output = document.getElementById("output");
 
-    if (parsed.type === "empty") {
-        result.innerHTML =
-            '<div class="error-message">Please enter a GitHub username or paste a GitHub link.</div>';
+    if (!input) {
+        showError("Please enter a GitHub username or paste a GitHub link.");
         return;
     }
 
-    if (parsed.type === "invalid") {
-        result.innerHTML =
-            '<div class="error-message">That link does not look like a supported GitHub URL.</div>';
-        return;
-    }
-
-    result.innerHTML = '<div class="message">Loading details...</div>';
+    showLoading();
+    document.getElementById("search-btn").disabled = true;
 
     try {
-        let output = "";
+        const response = await fetch(`/api/search?q=${encodeURIComponent(input)}`);
+        const data = await response.json();
 
-        switch (parsed.type) {
+        if (!response.ok) {
+            throw new Error(data.error || "Search failed");
+        }
+
+        saveHistory(input);
+        updateRateLimitFooter(data.rateLimit);
+
+        let html = "";
+        switch (data.type) {
             case "user":
-                output = await describeUser(parsed.owner);
+                html = renderUser(data);
                 break;
             case "repo":
-                output = await describeRepo(parsed.owner, parsed.repo);
+                html = renderRepo(data);
                 break;
             case "issue":
-                output = await describeIssue(parsed.owner, parsed.repo, parsed.number);
+                html = renderIssue(data);
                 break;
             case "pull":
-                output = await describePull(parsed.owner, parsed.repo, parsed.number);
+                html = renderPull(data);
                 break;
-            case "username":
+            case "commit":
+                html = renderCommit(data);
+                break;
+            case "activity":
             default:
-                output = await showUserActivity(parsed.username);
+                html = renderActivity(data);
                 break;
         }
 
-        result.innerHTML = output;
+        output.innerHTML = html;
     } catch (error) {
-        result.innerHTML = `<div class="error-message">Error: ${error.message}</div>`;
+        showError(error.message);
+        updateRateLimitFooter(null);
+    } finally {
+        document.getElementById("search-btn").disabled = false;
     }
 }
