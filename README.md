@@ -110,7 +110,7 @@ For development with auto-restart:
 ```bash
 npm run dev
 ```
-
+īīī
 > **Note:** The app requires the backend server. Opening `index.html` directly will not work.
 
 Local SQLite data is stored in `data/app.db` (gitignored).
