@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: github-activity-viewer
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: github-activity-db
+          property: connectionString
+      - key: GITHUB_TOKEN
+        sync: false
+
+databases:
+  - name: github-activity-db
+    plan: free
+    databaseName: github_activity
+    user: github_activity

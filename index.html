@@ -18,11 +18,50 @@
                     <p class="subtitle">Explore profiles, repos, issues, PRs &amp; commits</p>
                 </div>
             </div>
-            <div class="status-pill" id="api-status" title="Backend connection status">
-                <span class="status-dot"></span>
-                <span class="status-text">Connecting...</span>
+            <div class="header-actions">
+                <div class="status-pill" id="api-status" title="Backend connection status">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Connecting...</span>
+                </div>
+                <div class="auth-area" id="auth-area">
+                    <button type="button" class="auth-btn" id="open-auth">Sign in</button>
+                </div>
             </div>
         </header>
+
+        <div class="auth-modal" id="auth-modal" hidden>
+            <div class="auth-modal-backdrop" id="auth-backdrop"></div>
+            <div class="auth-modal-card" role="dialog" aria-labelledby="auth-title">
+                <button type="button" class="modal-close" id="close-auth" aria-label="Close">&times;</button>
+                <h2 id="auth-title">Welcome back</h2>
+                <p class="auth-subtitle" id="auth-subtitle">Sign in to save search history across devices.</p>
+
+                <div class="auth-tabs">
+                    <button type="button" class="auth-tab active" data-tab="login">Sign in</button>
+                    <button type="button" class="auth-tab" data-tab="register">Create account</button>
+                </div>
+
+                <form id="login-form" class="auth-form">
+                    <label for="login-email">Email</label>
+                    <input type="email" id="login-email" required autocomplete="email">
+                    <label for="login-password">Password</label>
+                    <input type="password" id="login-password" required autocomplete="current-password">
+                    <button type="submit" class="submit-btn">Sign in</button>
+                    <p class="auth-error" id="login-error" hidden></p>
+                </form>
+
+                <form id="register-form" class="auth-form" hidden>
+                    <label for="register-name">Name</label>
+                    <input type="text" id="register-name" required autocomplete="name">
+                    <label for="register-email">Email</label>
+                    <input type="email" id="register-email" required autocomplete="email">
+                    <label for="register-password">Password</label>
+                    <input type="password" id="register-password" required minlength="6" autocomplete="new-password">
+                    <button type="submit" class="submit-btn">Create account</button>
+                    <p class="auth-error" id="register-error" hidden></p>
+                </form>
+            </div>
+        </div>
 
         <main class="main-card">
             <section class="search-section">

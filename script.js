@@ -1,5 +1,8 @@
 const HISTORY_KEY = "github-viewer-history";
+const AUTH_TOKEN_KEY = "github-viewer-token";
 const MAX_HISTORY = 8;
+
+let currentUser = null;
 
 document.addEventListener("DOMContentLoaded", () => {
     const input = document.getElementById("username");
@@ -13,9 +16,168 @@ document.addEventListener("DOMContentLoaded", () => {
     input.addEventListener("paste", () => setTimeout(getActivity, 0));
     clearHistoryBtn.addEventListener("click", clearHistory);
 
-    renderHistory();
-    checkHealth();
+    setupAuthUI();
+    initApp();
 });
+
+async function initApp() {
+    await checkHealth();
+    await restoreSession();
+    await renderHistory();
+}
+
+function getToken() {
+    return localStorage.getItem(AUTH_TOKEN_KEY);
+}
+
+function getAuthHeaders() {
+    const token = getToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+async function apiFetch(url, options = {}) {
+    return fetch(url, {
+        ...options,
+        headers: {
+            "Content-Type": "application/json",
+            ...getAuthHeaders(),
+            ...options.headers,
+        },
+    });
+}
+
+function setupAuthUI() {
+    document.getElementById("open-auth").addEventListener("click", () => openAuthModal("login"));
+    document.getElementById("close-auth").addEventListener("click", closeAuthModal);
+    document.getElementById("auth-backdrop").addEventListener("click", closeAuthModal);
+
+    document.querySelectorAll(".auth-tab").forEach((tab) => {
+        tab.addEventListener("click", () => switchAuthTab(tab.dataset.tab));
+    });
+
+    document.getElementById("login-form").addEventListener("submit", handleLogin);
+    document.getElementById("register-form").addEventListener("submit", handleRegister);
+}
+
+function openAuthModal(tab = "login") {
+    document.getElementById("auth-modal").hidden = false;
+    switchAuthTab(tab);
+}
+
+function closeAuthModal() {
+    document.getElementById("auth-modal").hidden = true;
+    document.getElementById("login-error").hidden = true;
+    document.getElementById("register-error").hidden = true;
+}
+
+function switchAuthTab(tab) {
+    const isLogin = tab === "login";
+    document.querySelectorAll(".auth-tab").forEach((el) => {
+        el.classList.toggle("active", el.dataset.tab === tab);
+    });
+    document.getElementById("login-form").hidden = !isLogin;
+    document.getElementById("register-form").hidden = isLogin;
+    document.getElementById("auth-title").textContent = isLogin ? "Welcome back" : "Create account";
+    document.getElementById("auth-subtitle").textContent = isLogin
+        ? "Sign in to save search history across devices."
+        : "Register to persist your searches in the database.";
+}
+
+async function handleLogin(event) {
+    event.preventDefault();
+    const errorEl = document.getElementById("login-error");
+    errorEl.hidden = true;
+
+    try {
+        const response = await apiFetch("/api/auth/login", {
+            method: "POST",
+            body: JSON.stringify({
+                email: document.getElementById("login-email").value,
+                password: document.getElementById("login-password").value,
+            }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Login failed");
+
+        localStorage.setItem(AUTH_TOKEN_KEY, data.token);
+        currentUser = data.user;
+        updateAuthUI();
+        closeAuthModal();
+        await renderHistory();
+    } catch (error) {
+        errorEl.textContent = error.message;
+        errorEl.hidden = false;
+    }
+}
+
+async function handleRegister(event) {
+    event.preventDefault();
+    const errorEl = document.getElementById("register-error");
+    errorEl.hidden = true;
+
+    try {
+        const response = await apiFetch("/api/auth/register", {
+            method: "POST",
+            body: JSON.stringify({
+                name: document.getElementById("register-name").value,
+                email: document.getElementById("register-email").value,
+                password: document.getElementById("register-password").value,
+            }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Registration failed");
+
+        localStorage.setItem(AUTH_TOKEN_KEY, data.token);
+        currentUser = data.user;
+        updateAuthUI();
+        closeAuthModal();
+        await renderHistory();
+    } catch (error) {
+        errorEl.textContent = error.message;
+        errorEl.hidden = false;
+    }
+}
+
+async function restoreSession() {
+    if (!getToken()) {
+        updateAuthUI();
+        return;
+    }
+
+    try {
+        const response = await apiFetch("/api/auth/me");
+        if (!response.ok) throw new Error("session expired");
+        const data = await response.json();
+        currentUser = data.user;
+    } catch {
+        localStorage.removeItem(AUTH_TOKEN_KEY);
+        currentUser = null;
+    }
+
+    updateAuthUI();
+}
+
+function logout() {
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    currentUser = null;
+    updateAuthUI();
+    renderHistory();
+}
+
+function updateAuthUI() {
+    const area = document.getElementById("auth-area");
+
+    if (currentUser) {
+        area.innerHTML = `
+            <span class="user-greeting">Hi, ${escapeHtml(currentUser.name)}</span>
+            <button type="button" class="text-btn" id="logout-btn">Sign out</button>`;
+        document.getElementById("logout-btn").addEventListener("click", logout);
+        return;
+    }
+
+    area.innerHTML = `<button type="button" class="auth-btn" id="open-auth">Sign in</button>`;
+    document.getElementById("open-auth").addEventListener("click", () => openAuthModal("login"));
+}
 
 async function checkHealth() {
     const statusEl = document.getElementById("api-status");
@@ -27,14 +189,17 @@ async function checkHealth() {
         if (!response.ok) throw new Error("offline");
         const data = await response.json();
         dot.classList.add("online");
-        text.textContent = data.githubToken ? "API connected (token active)" : "API connected";
+        const dbLabel = data.database === "postgres" ? "PostgreSQL" : "SQLite";
+        text.textContent = data.githubToken
+            ? `API · ${dbLabel} · token active`
+            : `API · ${dbLabel}`;
     } catch {
         dot.classList.add("offline");
         text.textContent = "Backend offline — run npm start";
     }
 }
 
-function getHistory() {
+function getLocalHistory() {
     try {
         return JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
     } catch {
@@ -42,25 +207,54 @@ function getHistory() {
     }
 }
 
-function saveHistory(query) {
+function saveLocalHistory(query) {
     const trimmed = query.trim();
-    if (!trimmed) return;
+    if (!trimmed || currentUser) return;
 
-    const history = getHistory().filter((item) => item !== trimmed);
+    const history = getLocalHistory().filter((item) => item !== trimmed);
     history.unshift(trimmed);
     localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(0, MAX_HISTORY)));
-    renderHistory();
 }
 
-function clearHistory() {
-    localStorage.removeItem(HISTORY_KEY);
-    renderHistory();
+async function saveHistory(query) {
+    if (currentUser) {
+        await renderHistory();
+        return;
+    }
+    saveLocalHistory(query);
+    await renderHistory();
 }
 
-function renderHistory() {
-    const history = getHistory();
+async function clearHistory() {
+    if (currentUser) {
+        await apiFetch("/api/history", { method: "DELETE" });
+    } else {
+        localStorage.removeItem(HISTORY_KEY);
+    }
+    await renderHistory();
+}
+
+async function getHistoryItems() {
+    if (currentUser) {
+        const response = await apiFetch("/api/history");
+        if (!response.ok) return [];
+        const data = await response.json();
+        return data.history.map((item) => item.query);
+    }
+    return getLocalHistory();
+}
+
+async function renderHistory() {
+    const history = await getHistoryItems();
     const section = document.getElementById("history-section");
     const list = document.getElementById("history-list");
+    const header = section.querySelector(".history-header h2");
+
+    if (currentUser) {
+        header.textContent = "Your saved searches";
+    } else {
+        header.textContent = "Recent searches";
+    }
 
     if (history.length === 0) {
         section.hidden = true;
@@ -388,14 +582,16 @@ async function getActivity() {
     document.getElementById("search-btn").disabled = true;
 
     try {
-        const response = await fetch(`/api/search?q=${encodeURIComponent(input)}`);
+        const response = await fetch(`/api/search?q=${encodeURIComponent(input)}`, {
+            headers: getAuthHeaders(),
+        });
         const data = await response.json();
 
         if (!response.ok) {
             throw new Error(data.error || "Search failed");
         }
 
-        saveHistory(input);
+        await saveHistory(input);
         updateRateLimitFooter(data.rateLimit);
 
         let html = "";
