@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
+    "@opentelemetry/sdk-node": "^0.220.0",
     "axios": "^1.18.1",
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^11.8.1",

@@ -718,3 +718,56 @@ code {
     margin-top: 12px;
     text-align: center;
 }
+
+/* Add to style.css */
+.analysis-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-top: 20px;
+    align-items: start;
+}
+
+.code-pane, .ai-pane {
+    background: #0d1117; /* GitHub Dark background */
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 16px;
+    height: 600px;
+    overflow-y: auto;
+}
+
+.code-pane h3, .ai-pane h3 {
+    margin-top: 0;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #30363d;
+    font-size: 14px;
+    color: #c9d1d9;
+}
+
+.code-pane pre {
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 13px;
+    color: #e6edf3;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.ai-pane .ai-content {
+    color: #8b949e;
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.loading-state {
+    text-align: center;
+    padding: 40px;
+    color: #8b949e;
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+    .analysis-container {
+        grid-template-columns: 1fr; /* Stack vertically on small screens */
+    }
+}
