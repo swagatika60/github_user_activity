@@ -36,17 +36,36 @@ after(() => {
     global.fetch = realFetch;
 });
 
-test("lookupUser returns the profile and recent events", async () => {
+test("lookupUser returns the profile, events, repos, languages and contributions", async () => {
+    const now = new Date().toISOString();
     mockGitHub({
         "/users/alice": { body: { login: "alice", name: "Alice", public_repos: 5 } },
-        "/users/alice/events?per_page=10": { body: [{ id: "1", type: "PushEvent" }] },
+        "/users/alice/events?per_page=100": {
+            body: [
+                { id: "1", type: "PushEvent", created_at: now, repo: { name: "alice/x" }, payload: { ref: "refs/heads/main", commits: [{}, {}] } },
+                { id: "2", type: "PullRequestEvent", created_at: now, repo: { name: "alice/y" }, payload: { action: "opened" } },
+            ],
+        },
+        "/users/alice/repos?per_page=100&sort=updated": {
+            body: [
+                { name: "x", full_name: "alice/x", description: null, language: "JavaScript", stargazers_count: 3, forks_count: 1, fork: false, html_url: "https://github.com/alice/x", updated_at: now, topics: [] },
+                { name: "y", full_name: "alice/y", description: null, language: "JavaScript", stargazers_count: 1, forks_count: 0, fork: false, html_url: "https://github.com/alice/y", updated_at: now, topics: [] },
+            ],
+        },
     });
 
     const result = await github.lookupUser("alice");
 
     assert.strictEqual(result.type, "user");
     assert.strictEqual(result.profile.login, "alice");
-    assert.deepStrictEqual(result.events, [{ id: "1", type: "PushEvent" }]);
+    assert.strictEqual(result.events.length, 2);
+    assert.strictEqual(result.repos.length, 2);
+    assert.strictEqual(result.repoCount, 2);
+    assert.strictEqual(result.repos[0].stargazers_count, 3);
+    assert.deepStrictEqual(result.languages[0], { name: "JavaScript", count: 2, percentage: 100 });
+    assert.strictEqual(result.contributions.length, 196);
+    assert.strictEqual(result.activityGraph.totals.commits, 2);
+    assert.strictEqual(result.activityGraph.totals.prs, 1);
     assert.strictEqual(result.cached, false);
     assert.strictEqual(result.rateLimit.remaining, 4999);
     assert.strictEqual(result.rateLimit.limit, 5000);
@@ -55,18 +74,19 @@ test("lookupUser returns the profile and recent events", async () => {
 test("lookupUser serves the second call from cache", async () => {
     mockGitHub({
         "/users/cacheduser": { body: { login: "cacheduser" } },
-        "/users/cacheduser/events?per_page=10": { body: [] },
+        "/users/cacheduser/events?per_page=100": { body: [] },
+        "/users/cacheduser/repos?per_page=100&sort=updated": { body: [] },
     });
 
     await github.lookupUser("cacheduser");
     const second = await github.lookupUser("cacheduser");
 
     assert.strictEqual(second.cached, true);
-    // First call makes one profile request; the second call makes none (both
-    // profile and events are served from cache).
+    // First call makes one request per endpoint (profile, events, repos); the
+    // second call makes none because everything is served from cache.
     const profileCalls = requests.filter((r) => r.path === "/users/cacheduser");
     assert.strictEqual(profileCalls.length, 1);
-    assert.strictEqual(requests.length, 2);
+    assert.strictEqual(requests.length, 3);
 });
 
 test("lookupActivity returns events for a username", async () => {
@@ -137,7 +157,8 @@ test("lookupCommit returns commit details with owner and repo", async () => {
 test("404 responses surface the not-found error", async () => {
     mockGitHub({
         "/users/ghost": { status: 404, body: {} },
-        "/users/ghost/events?per_page=10": { status: 404, body: {} },
+        "/users/ghost/events?per_page=100": { status: 404, body: {} },
+        "/users/ghost/repos?per_page=100&sort=updated": { status: 404, body: {} },
     });
 
     await assert.rejects(
@@ -172,4 +193,74 @@ test("requests carry Accept and User-Agent and no token by default", async () =>
     assert.strictEqual(requests[0].headers.Accept, "application/vnd.github+json");
     assert.strictEqual(requests[0].headers["User-Agent"], "Github-User-Activity-App");
     assert.strictEqual(requests[0].headers.Authorization, undefined);
+});
+
+test("lookupUserStarred returns slim starred repos", async () => {
+    const now = new Date().toISOString();
+    mockGitHub({
+        "/users/alice/starred?per_page=30&sort=created": {
+            body: [
+                { name: "starrepo", full_name: "other/starrepo", description: "nice", language: "Go", stargazers_count: 42, forks_count: 3, fork: false, html_url: "https://github.com/other/starrepo", updated_at: now, topics: [] },
+            ],
+        },
+    });
+
+    const result = await github.lookupUserStarred("alice");
+
+    assert.strictEqual(result.type, "starred");
+    assert.strictEqual(result.user, "alice");
+    assert.strictEqual(result.repos.length, 1);
+    assert.strictEqual(result.repos[0].full_name, "other/starrepo");
+    assert.strictEqual(result.repos[0].stargazers_count, 42);
+});
+
+test("compareUsers summarizes two profiles with stars and top language", async () => {
+    mockGitHub({
+        "/users/anna": { body: { login: "anna", name: "Anna", public_repos: 8, followers: 100, following: 5, created_at: "2020-01-01T00:00:00Z", bio: null, location: null, company: null, avatar_url: "", html_url: "" } },
+        "/users/anna/repos?per_page=100&sort=updated": {
+            body: [
+                { name: "r1", language: "Python", stargazers_count: 10 },
+                { name: "r2", language: "Python", stargazers_count: 5 },
+                { name: "r3", language: "Go", stargazers_count: 0 },
+            ],
+        },
+        "/users/bob": { body: { login: "bob", name: "Bob", public_repos: 3, followers: 10, following: 2, created_at: "2021-05-05T00:00:00Z", bio: null, location: null, company: null, avatar_url: "", html_url: "" } },
+        "/users/bob/repos?per_page=100&sort=updated": {
+            body: [{ name: "x", language: "Rust", stargazers_count: 1 }],
+        },
+    });
+
+    const result = await github.compareUsers("anna", "bob");
+
+    assert.strictEqual(result.type, "compare");
+    assert.strictEqual(result.user1.login, "anna");
+    assert.strictEqual(result.user1.public_repos, 8);
+    assert.strictEqual(result.user1.totalStars, 15);
+    assert.strictEqual(result.user1.topLanguage, "Python");
+    assert.strictEqual(result.user2.followers, 10);
+    assert.strictEqual(result.user2.topLanguage, "Rust");
+});
+
+test("lookupRepoTrees returns a flattened file tree with the default branch", async () => {
+    mockGitHub({
+        "/repos/acme/widgets": { body: { full_name: "acme/widgets", default_branch: "main" } },
+        "/repos/acme/widgets/git/trees/main?recursive=1": {
+            body: {
+                truncated: false,
+                tree: [
+                    { path: "src", type: "tree", size: 0 },
+                    { path: "src/index.js", type: "blob", size: 100 },
+                    { path: "README.md", type: "blob", size: 50 },
+                ],
+            },
+        },
+    });
+
+    const result = await github.lookupRepoTrees("acme", "widgets");
+
+    assert.strictEqual(result.type, "tree");
+    assert.strictEqual(result.branch, "main");
+    assert.strictEqual(result.truncated, false);
+    assert.strictEqual(result.tree.length, 3);
+    assert.deepStrictEqual(result.tree[1], { path: "src/index.js", type: "blob", size: 100 });
 });

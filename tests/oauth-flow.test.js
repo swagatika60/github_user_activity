@@ -54,8 +54,8 @@ before(async () => {
         if (u.includes("/api.github.com/users/") && u.includes("/events")) {
             return respond([
                 { id: "e1", type: "PushEvent", created_at: recent(0), repo: { name: "flowuser/hello" }, payload: { ref: "refs/heads/main", commits: [{}, {}] } },
-                { id: "e2", type: "PullRequestEvent", created_at: recent(0), repo: { name: "flowuser/hello" }, payload: { action: "opened" } },
-                { id: "e3", type: "IssuesEvent", created_at: recent(1), repo: { name: "flowuser/widgets" }, payload: { action: "opened" } },
+                { id: "e2", type: "PullRequestEvent", created_at: recent(0), repo: { name: "flowuser/hello" }, payload: { action: "opened", pull_request: { number: 42 } } },
+                { id: "e3", type: "IssuesEvent", created_at: recent(1), repo: { name: "flowuser/widgets" }, payload: { action: "opened", issue: { number: 7, html_url: "https://github.com/flowuser/widgets/issues/7" } } },
                 { id: "e4", type: "PullRequestReviewEvent", created_at: recent(1), repo: { name: "flowuser/widgets" }, payload: { action: "submitted" } },
                 { id: "e5", type: "CreateEvent", created_at: recent(0), repo: { name: "flowuser/hello" }, payload: { ref_type: "branch", ref: "feature" } },
             ]);
@@ -246,6 +246,16 @@ test("full OAuth flow: callback issues a session and /api/account returns profil
 
     assert.strictEqual(account.recentActivity.length, 5);
     assert.strictEqual(account.recentActivity[0].type, "PushEvent");
+
+    // Recent activity keeps the exact PR/issue links (not just the repo). The
+    // public feed omits html_url on PR payloads, so the link is derived from
+    // the repo + PR number.
+    const prEvent = account.recentActivity.find((e) => e.type === "PullRequestEvent");
+    assert.strictEqual(prEvent.payload.pull_request.number, 42);
+    assert.strictEqual(prEvent.payload.pull_request.html_url, "https://github.com/flowuser/hello/pull/42");
+    const issueEvent = account.recentActivity.find((e) => e.type === "IssuesEvent");
+    assert.strictEqual(issueEvent.payload.issue.number, 7);
+    assert.strictEqual(issueEvent.payload.issue.html_url, "https://github.com/flowuser/widgets/issues/7");
     assert.deepStrictEqual(account.priority, { red: 1, yellow: 1, green: 2, level: "red" });
 
     assert.deepStrictEqual(account.activityGraph.totals, {

@@ -16,9 +16,10 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     input.addEventListener("paste", () => setTimeout(getActivity, 0));
     clearHistoryBtn.addEventListener("click", clearHistory);
+    document.getElementById("output").addEventListener("click", handleOutputClick);
 
     setupAuthUI();
-    initApp();
+    initApp().then(handleUrlParams);
 });
 
 async function initApp() {
@@ -383,6 +384,27 @@ function formatActivityMessage(event) {
                 message: `Created ${escapeHtml(event.payload.ref_type || "repository")} in ${repoLink}`,
                 ago,
             };
+        case "PullRequestEvent":
+        case "PullRequestReviewEvent": {
+            const pr = event.payload?.pull_request;
+            // The public events feed omits html_url on PR payloads, so derive
+            // the exact link from the repo + PR number when needed.
+            const prHref = pr?.html_url || (pr?.number ? `${repoUrl}/pull/${pr.number}` : "");
+            const prLink = prHref
+                ? `<a href="${prHref}" target="_blank" rel="noopener" class="repo-link">PR #${pr.number}</a>`
+                : repoLink;
+            const action = event.payload?.action ? ` ${event.payload.action}` : "";
+            return { icon: "default", message: `Pull request${action} ${prLink} in ${repoLink}`, ago };
+        }
+        case "IssuesEvent":
+        case "IssueCommentEvent": {
+            const issue = event.payload?.issue;
+            const issueLink = issue?.html_url
+                ? `<a href="${issue.html_url}" target="_blank" rel="noopener" class="repo-link">issue #${issue.number}</a>`
+                : repoLink;
+            const action = event.payload?.action ? ` ${event.payload.action}` : "";
+            return { icon: "default", message: `Issue${action} ${issueLink} in ${repoLink}`, ago };
+        }
         default: {
             const name = event.type.replace(/Event$/, "").replace(/([A-Z])/g, " $1").trim();
             return { icon: "default", message: `${name} on ${repoLink}`, ago };
@@ -412,10 +434,9 @@ function renderUser(data) {
     const user = data.profile;
     const profileUrl = user.html_url;
 
-    const events = data.events.map(formatActivityMessage);
-
     return `
         ${renderMetaBanner(data.cached, data.rateLimit)}
+        ${toolbarHtml({ canStar: true, canCompare: true })}
         <div class="detail-card hero-card">
             <div class="profile-header">
                 <img src="${user.avatar_url}" alt="${escapeHtml(user.login)}" class="avatar">
@@ -436,7 +457,11 @@ function renderUser(data) {
             ${renderDetailRow("Joined", formatDate(user.created_at))}
             ${renderDetailRow("Profile", `<a href="${profileUrl}" target="_blank" rel="noopener" class="repo-link">${profileUrl}</a>`)}
         </div>
-        ${renderActivityList(events, "Recent Activity")}
+        ${data.contributions?.length ? renderHeatmap(data.contributions) : ""}
+        ${data.languages?.length ? renderLanguages(data.languages) : ""}
+        ${renderReposSection(data.repos || [])}
+        ${data.activityGraph ? renderActivityGraph(data.activityGraph) : ""}
+        ${renderActivityListWithFilters(data.events || [], "Recent Activity")}
     `;
 }
 
@@ -449,6 +474,7 @@ function renderRepo(data) {
 
     return `
         ${renderMetaBanner(data.cached, data.rateLimit)}
+        ${toolbarHtml({ isRepo: true })}
         <div class="detail-card">
             <div class="card-top">
                 <span class="type-badge">Repository</span>
@@ -573,10 +599,10 @@ function renderCommit(data) {
 }
 
 function renderActivity(data) {
-    const events = data.events.map(formatActivityMessage);
     return `
         ${renderMetaBanner(data.cached, data.rateLimit)}
-        ${renderActivityList(events, `Recent Activity · @${escapeHtml(data.username)}`)}
+        ${toolbarHtml({ canCompare: true })}
+        ${renderActivityListWithFilters(data.events || [], `Recent Activity · @${escapeHtml(data.username)}`)}
     `;
 }
 
@@ -831,10 +857,11 @@ function githubAccountSections(data) {
     return [
         renderPriorityBanner(data.priority),
         data.topActions?.length ? renderTopActions(data.topActions) : "",
+        renderFlowDiagram(data),
         profileCardHtml(profile),
         renderReposSection(data.repos),
         renderPriorityList(data.openPRs, "Open pull requests", "No open pull requests."),
-        renderPriorityList(data.reviewRequests, "PR Review", "No PRs waiting for your review."),
+        renderPriorityList(data.reviewRequests, "PR Review Queue", "No PRs waiting for your review."),
         renderPriorityList(data.assignedIssues, "Assigned issues", "No assigned issues."),
         data.activityGraph ? renderActivityGraph(data.activityGraph) : "",
         renderActivityList(activityEvents, "Recent activity"),
@@ -912,6 +939,8 @@ async function getActivity() {
             throw new Error(data.error || "Search failed");
         }
 
+        window.__lastResult = { query: input, data };
+
         await saveHistory(input);
         updateRateLimitFooter(data.rateLimit);
 
@@ -944,5 +973,421 @@ async function getActivity() {
         updateRateLimitFooter(null);
     } finally {
         document.getElementById("search-btn").disabled = false;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Modern features: toolbar, heatmap, languages, filters, compare, tree, flow
+// ---------------------------------------------------------------------------
+
+window.__lastResult = null;
+
+function toolbarHtml({ canStar = false, canCompare = false, isRepo = false } = {}) {
+    const buttons = [
+        `<button type="button" class="tool-btn" data-action="export" title="Download the result as JSON">⬇ Export</button>`,
+        `<button type="button" class="tool-btn" data-action="share" title="Copy a shareable link">🔗 Share</button>`,
+        canStar ? `<button type="button" class="tool-btn" data-action="starred" title="Show starred repositories">★ Starred</button>` : "",
+        canCompare ? `<button type="button" class="tool-btn" data-action="compare" title="Compare two GitHub users">⚖ Compare</button>` : "",
+        isRepo ? `<button type="button" class="tool-btn" data-action="tree" title="Browse the repository file tree">🌲 File tree</button>` : "",
+    ].filter(Boolean).join("");
+    return `<div class="result-toolbar">${buttons}</div>`;
+}
+
+function exportJson(data, filename) {
+    const safeName = String(filename).replace(/[^\w.\-]+/g, "_").toLowerCase() || "github-result";
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${safeName}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+}
+
+function buildShareUrl() {
+    const url = new URL(window.location.href);
+    url.search = "";
+    if (window.__lastResult?.isCompare) {
+        url.searchParams.set("c", [window.__lastResult.data.user1.login, window.__lastResult.data.user2.login].join("|"));
+    } else if (window.__lastResult?.query) {
+        url.searchParams.set("q", window.__lastResult.query);
+    }
+    return url.toString();
+}
+
+async function copyShareLink(btn) {
+    const url = buildShareUrl();
+    const original = btn.textContent;
+    try {
+        await navigator.clipboard.writeText(url);
+    } catch {
+        window.prompt("Copy this link:", url);
+    }
+    btn.textContent = "✓ Copied";
+    setTimeout(() => {
+        btn.textContent = original;
+    }, 1600);
+}
+
+async function loadStarred(btn) {
+    const login = window.__lastResult?.data?.profile?.login;
+    const toolbar = btn.closest(".result-toolbar");
+    if (!login || !toolbar) return;
+    btn.disabled = true;
+    btn.textContent = "Loading…";
+    try {
+        const response = await fetch(`/api/user/starred?user=${encodeURIComponent(login)}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Failed to load starred repos");
+        const section = document.createElement("div");
+        section.className = "starred-section";
+        section.innerHTML = `
+            <h3 class="section-title">Starred repositories <span class="count-badge">${data.repos.length}</span></h3>
+            ${data.repos.length
+                ? `<div class="repo-grid">${data.repos.map(renderRepoCard).join("")}</div>`
+                : `<div class="empty-state">${escapeHtml(login)} hasn't starred any repositories yet.</div>`}`;
+        toolbar.insertAdjacentElement("afterend", section);
+        btn.textContent = "✓ Starred";
+        section.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (error) {
+        const err = document.createElement("div");
+        err.className = "error-message";
+        err.textContent = error.message;
+        toolbar.insertAdjacentElement("afterend", err);
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+function comparePanelHtml(prefillA = "", prefillB = "") {
+    return `
+        <div class="detail-card compare-panel" id="compare-panel">
+            <h2 class="section-title">Compare GitHub users</h2>
+            <div class="compare-form">
+                <input type="text" id="compare-user1" placeholder="first username" value="${escapeHtml(prefillA)}" autocomplete="off">
+                <span class="compare-vs">vs</span>
+                <input type="text" id="compare-user2" placeholder="second username" value="${escapeHtml(prefillB)}" autocomplete="off">
+                <button type="button" class="submit-btn" id="compare-run">Compare</button>
+            </div>
+            <div id="compare-result"></div>
+        </div>`;
+}
+
+function openCompare(result) {
+    const existing = document.getElementById("compare-panel");
+    if (existing) {
+        existing.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+    }
+    const login = result?.data?.profile?.login || result?.data?.username || "";
+    document.getElementById("output").insertAdjacentHTML("beforeend", comparePanelHtml(login, ""));
+    document.getElementById("compare-run").addEventListener("click", runCompare);
+    document.getElementById("compare-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function runCompare() {
+    const user1El = document.getElementById("compare-user1");
+    const user2El = document.getElementById("compare-user2");
+    const resultEl = document.getElementById("compare-result");
+    const a = (user1El.value || "").trim();
+    const b = (user2El.value || "").trim();
+    if (!a || !b) {
+        resultEl.innerHTML = '<div class="error-message">Enter both usernames.</div>';
+        return;
+    }
+    if (a.toLowerCase() === b.toLowerCase()) {
+        resultEl.innerHTML = '<div class="error-message">Pick two different users to compare.</div>';
+        return;
+    }
+    resultEl.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Comparing ${escapeHtml(a)} vs ${escapeHtml(b)}…</p></div>`;
+    try {
+        const response = await fetch(`/api/compare?user1=${encodeURIComponent(a)}&user2=${encodeURIComponent(b)}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Compare failed");
+        window.__lastResult = { query: `${a} vs ${b}`, data, isCompare: true };
+        resultEl.innerHTML = renderCompare(data);
+        updateRateLimitFooter(data.rateLimit);
+    } catch (error) {
+        resultEl.innerHTML = `<div class="error-message">${escapeHtml(error.message)}</div>`;
+    }
+}
+
+function compareCardHtml(user) {
+    const langs = (user.languages || [])
+        .slice(0, 4)
+        .map(
+            (l) =>
+                `<span class="compare-lang"><span class="lang-dot" style="background:${LANGUAGE_COLORS[l.name] || "#8b949e"}"></span>${escapeHtml(l.name)} ${l.percentage}%</span>`
+        )
+        .join("");
+    return `
+        <div class="detail-card compare-card">
+            <div class="profile-header">
+                <img src="${user.avatar_url}" alt="${escapeHtml(user.login)}" class="avatar">
+                <div class="profile-info">
+                    <h2>${escapeHtml(user.name || user.login)}</h2>
+                    <a href="${user.html_url}" target="_blank" rel="noopener" class="repo-link">@${escapeHtml(user.login)}</a>
+                </div>
+            </div>
+            <p class="detail-description">${escapeHtml(truncateText(user.bio, 160))}</p>
+            ${user.topLanguage ? `<div class="detail-row"><span class="detail-label">Top language</span><span class="detail-value">${escapeHtml(user.topLanguage)}</span></div>` : ""}
+            ${langs ? `<div class="compare-langs">${langs}</div>` : ""}
+        </div>`;
+}
+
+function renderCompare(data) {
+    const a = data.user1;
+    const b = data.user2;
+    const cmp = (av, bv) => (av === bv ? "" : av > bv ? "wins" : "");
+    const rows = [
+        ["Repositories", a.public_repos, b.public_repos],
+        ["Followers", a.followers, b.followers],
+        ["Following", a.following, b.following],
+        ["Total stars*", a.totalStars, b.totalStars],
+    ];
+    const tableRows = rows
+        .map(
+            ([label, av, bv]) => `
+                <tr>
+                    <td class="cmp-label">${label}</td>
+                    <td class="cmp-val ${cmp(av, bv) === "wins" ? "cmp-winner" : ""}">${av}</td>
+                    <td class="cmp-val ${cmp(bv, av) === "wins" ? "cmp-winner" : ""}">${bv}</td>
+                </tr>`
+        )
+        .join("");
+    return `
+        <div class="compare-grid">${compareCardHtml(a)}${compareCardHtml(b)}</div>
+        <div class="detail-card compare-table-wrap">
+            <table class="compare-table">
+                <tbody>${tableRows}</tbody>
+            </table>
+            <p class="detail-muted">* Stars summed across up to 100 repos · Top language: ${escapeHtml(a.topLanguage || "—")} vs ${escapeHtml(b.topLanguage || "—")}</p>
+        </div>`;
+}
+
+async function loadRepoTree(btn) {
+    const repo = window.__lastResult?.data?.repo;
+    const toolbar = btn.closest(".result-toolbar");
+    if (!repo || !toolbar) return;
+    const [owner, name] = String(repo.full_name).split("/");
+    btn.disabled = true;
+    btn.textContent = "Loading…";
+    try {
+        const response = await fetch(`/api/repo/tree?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(name)}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Failed to load file tree");
+        const section = document.createElement("div");
+        section.className = "tree-section";
+        section.innerHTML = `
+            <h3 class="section-title">File tree <span class="count-badge">${data.tree.length} items</span></h3>
+            ${data.truncated ? `<p class="detail-muted">Large repository — showing the first ${data.tree.length} paths (${escapeHtml(data.branch)} branch).</p>` : ""}
+            <div class="repo-tree">${buildTreeHtml(data.tree)}</div>`;
+        toolbar.insertAdjacentElement("afterend", section);
+        section.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (error) {
+        const err = document.createElement("div");
+        err.className = "error-message";
+        err.textContent = error.message;
+        toolbar.insertAdjacentElement("afterend", err);
+    } finally {
+        btn.textContent = "🌲 File tree";
+        btn.disabled = false;
+    }
+}
+
+function treeFileIcon(name) {
+    const ext = (name.split(".").pop() || "").toLowerCase();
+    if (/^(js|ts|jsx|tsx|mjs|cjs)$/.test(ext)) return "🟨";
+    if (/^(css|scss|html)$/.test(ext)) return "🟧";
+    if (/^(json|ya?ml|toml)$/.test(ext)) return "⬜";
+    if (/^(md|txt)$/.test(ext)) return "📝";
+    if (/^(png|jpe?g|gif|svg|webp)$/.test(ext)) return "🖼";
+    return "📄";
+}
+
+function buildTreeHtml(paths, cap = 250) {
+    const root = { dirs: new Map(), files: [] };
+    let count = 0;
+    for (const node of paths || []) {
+        if (count >= cap) break;
+        const parts = node.path.split("/");
+        let cur = root;
+        parts.forEach((part, i) => {
+            const isLast = i === parts.length - 1;
+            if (isLast) {
+                if (node.type === "tree") {
+                    if (!cur.dirs.has(part)) cur.dirs.set(part, { dirs: new Map(), files: [] });
+                } else {
+                    cur.files.push({ name: part, path: node.path, size: node.size });
+                }
+            } else {
+                if (!cur.dirs.has(part)) cur.dirs.set(part, { dirs: new Map(), files: [] });
+                cur = cur.dirs.get(part);
+            }
+        });
+        count += 1;
+    }
+
+    const renderNode = (name, node) => {
+        const dirs = [...node.dirs.entries()]
+            .sort(([x], [y]) => x.localeCompare(y))
+            .map(([n, child]) => renderNode(n, child))
+            .join("");
+        const files = node.files
+            .sort((x, y) => x.name.localeCompare(y.name))
+            .map(
+                (f) =>
+                    `<div class="tree-file" title="${escapeHtml(f.path)}${f.size ? ` · ${f.size} bytes` : ""}"><span class="tree-icon">${treeFileIcon(f.name)}</span>${escapeHtml(f.name)}</div>`
+            )
+            .join("");
+        return `<details class="tree-dir" open><summary><span class="tree-icon">📁</span>${escapeHtml(name)}</summary>${dirs}${files}</details>`;
+    };
+
+    const dirs = [...root.dirs.entries()]
+        .sort(([x], [y]) => x.localeCompare(y))
+        .map(([n, child]) => renderNode(n, child))
+        .join("");
+    const files = root.files
+        .sort((x, y) => x.name.localeCompare(y.name))
+        .map(
+            (f) =>
+                `<div class="tree-file" title="${escapeHtml(f.path)}${f.size ? ` · ${f.size} bytes` : ""}"><span class="tree-icon">${treeFileIcon(f.name)}</span>${escapeHtml(f.name)}</div>`
+        )
+        .join("");
+    return dirs + files || '<div class="empty-state">No files found.</div>';
+}
+
+const HEAT_LEVELS = ["#161b22", "#0e4429", "#006d32", "#26a641", "#39d353"];
+
+function renderHeatmap(contributions) {
+    const max = Math.max(1, ...contributions.map((d) => d.count));
+    const cells = contributions
+        .map((d) => {
+            const level = d.count === 0 ? 0 : Math.min(4, 1 + Math.round((d.count / max) * 3));
+            return `<span class="heat-cell heat-${level}" title="${d.date}: ${d.count} activity event${d.count === 1 ? "" : "s"}"></span>`;
+        })
+        .join("");
+    const legend = HEAT_LEVELS.map((_, i) => `<span class="heat-cell heat-${i}"></span>`).join("");
+    return `
+        <h3 class="section-title">Contribution activity <span class="count-badge">last 28 weeks</span></h3>
+        <div class="detail-card heat-card">
+            <div class="heatmap">${cells}</div>
+            <div class="heat-legend"><span class="detail-muted">Less</span>${legend}<span class="detail-muted">More</span></div>
+        </div>`;
+}
+
+function renderLanguages(languages) {
+    const bars = languages
+        .map(
+            (l) => `
+                <div class="lang-bar-row">
+                    <span class="lang-bar-name">${escapeHtml(l.name)}</span>
+                    <span class="lang-bar-track"><span class="lang-bar-fill" style="width:${l.percentage}%;background:${LANGUAGE_COLORS[l.name] || "#8b949e"}"></span></span>
+                    <span class="lang-bar-pct">${l.percentage}%</span>
+                </div>`
+        )
+        .join("");
+    return `
+        <h3 class="section-title">Top languages</h3>
+        <div class="detail-card lang-card"><div class="lang-bars">${bars}</div></div>`;
+}
+
+function renderFlowDiagram(data) {
+    const total = (g) => (g ? Object.values(g.totals).reduce((sum, n) => sum + n, 0) : 0);
+    const steps = [
+        { label: "Open pull requests", value: data.openPRs?.length || 0, color: "#58a6ff" },
+        { label: "Reviews needed", value: data.reviewRequests?.length || 0, color: "#bc8cff" },
+        { label: "Assigned issues", value: data.assignedIssues?.length || 0, color: "#d29922" },
+        { label: "Activity (last 14 days)", value: total(data.activityGraph), color: "#2ea043" },
+        { label: "Repositories", value: data.repos?.length || 0, color: "#f0883e" },
+    ];
+    const body = steps
+        .map(
+            (s) => `
+                <div class="flow-step" style="--flow-color:${s.color}">
+                    <div class="flow-marker"><span class="flow-dot"></span></div>
+                    <div class="flow-content">
+                        <span class="flow-label">${s.label}</span>
+                        <span class="flow-value">${s.value}</span>
+                    </div>
+                </div>`
+        )
+        .join("");
+    return `
+        <h3 class="section-title">Workflow overview</h3>
+        <div class="detail-card flow-card"><div class="flow-stepper">${body}</div></div>`;
+}
+
+const ACTIVITY_FILTERS = [
+    { key: "all", label: "All", match: () => true },
+    { key: "push", label: "Pushes", match: (e) => e.type === "PushEvent" },
+    { key: "pr", label: "Pull requests", match: (e) => e.type === "PullRequestEvent" || e.type === "PullRequestReviewEvent" },
+    { key: "issue", label: "Issues", match: (e) => e.type === "IssuesEvent" || e.type === "IssueCommentEvent" },
+    { key: "star", label: "Stars", match: (e) => e.type === "WatchEvent" },
+    { key: "fork", label: "Forks", match: (e) => e.type === "ForkEvent" },
+];
+
+function renderActivityListWithFilters(rawEvents, title, filterKey = "all") {
+    const filter = ACTIVITY_FILTERS.find((f) => f.key === filterKey) || ACTIVITY_FILTERS[0];
+    const filtered = (rawEvents || []).filter(filter.match);
+    const chips = ACTIVITY_FILTERS.map(
+        (f) =>
+            `<button type="button" class="filter-chip ${f.key === filterKey ? "active" : ""}" data-filter="${f.key}">${f.label}</button>`
+    ).join("");
+    const items = filtered.length
+        ? filtered
+              .map((e) => {
+                  const { icon, message, ago } = formatActivityMessage(e);
+                  return `<article class="activity-item activity-${icon}"><div class="activity-content">${message}</div><time class="activity-time">${ago}</time></article>`;
+              })
+              .join("")
+        : '<div class="empty-state">No activity of this type.</div>';
+    return `
+        <div class="activity-block" data-title="${escapeHtml(title)}">
+            <h2 class="section-title">${title} <span class="count-badge">${filtered.length}</span></h2>
+            <div class="filter-chips">${chips}</div>
+            <div class="activity-list">${items}</div>
+        </div>`;
+}
+
+function handleOutputClick(event) {
+    const actionBtn = event.target.closest("[data-action]");
+    if (actionBtn) {
+        const result = window.__lastResult;
+        if (!result) return;
+        const action = actionBtn.dataset.action;
+        if (action === "export") exportJson(result.data, result.query || "github-result");
+        else if (action === "share") copyShareLink(actionBtn);
+        else if (action === "starred") loadStarred(actionBtn);
+        else if (action === "compare") openCompare(result);
+        else if (action === "tree") loadRepoTree(actionBtn);
+        return;
+    }
+
+    const chip = event.target.closest("[data-filter]");
+    if (chip) {
+        const block = chip.closest(".activity-block");
+        const title = block.dataset.title;
+        const events = window.__lastResult?.data?.events || [];
+        block.outerHTML = renderActivityListWithFilters(events, title, chip.dataset.filter);
+    }
+}
+
+async function handleUrlParams() {
+    const params = new URLSearchParams(window.location.search);
+    const q = params.get("q");
+    const c = params.get("c");
+    if (c && c.includes("|")) {
+        const [a, b] = c.split("|");
+        document.getElementById("username").value = a;
+        openCompare({ data: { profile: { login: a } } });
+        document.getElementById("compare-user1").value = a;
+        document.getElementById("compare-user2").value = b;
+        await runCompare();
+    } else if (q) {
+        document.getElementById("username").value = q;
+        await getActivity();
     }
 }

@@ -90,6 +90,59 @@ function createApp() {
         }
     });
 
+    app.get("/api/user/starred", async (req, res) => {
+        const user = String(req.query.user || "").trim();
+        if (!user) {
+            return res.status(400).json({ error: "Missing user parameter." });
+        }
+        try {
+            const result = await github.lookupUserStarred(user);
+            res.json(result);
+        } catch (error) {
+            res.status(error.status || 500).json({
+                error: error.message || "Unexpected server error",
+                rateLimit: error.rateLimit,
+            });
+        }
+    });
+
+    app.get("/api/compare", async (req, res) => {
+        const user1 = String(req.query.user1 || "").trim();
+        const user2 = String(req.query.user2 || "").trim();
+        if (!user1 || !user2) {
+            return res.status(400).json({ error: "Both user1 and user2 parameters are required." });
+        }
+        if (user1.toLowerCase() === user2.toLowerCase()) {
+            return res.status(400).json({ error: "Pick two different users to compare." });
+        }
+        try {
+            const result = await github.compareUsers(user1, user2);
+            res.json(result);
+        } catch (error) {
+            res.status(error.status || 500).json({
+                error: error.message || "Unexpected server error",
+                rateLimit: error.rateLimit,
+            });
+        }
+    });
+
+    app.get("/api/repo/tree", async (req, res) => {
+        const owner = String(req.query.owner || "").trim();
+        const repo = String(req.query.repo || "").trim();
+        if (!owner || !repo) {
+            return res.status(400).json({ error: "Missing owner or repo parameter." });
+        }
+        try {
+            const result = await github.lookupRepoTrees(owner, repo);
+            res.json(result);
+        } catch (error) {
+            res.status(error.status || 500).json({
+                error: error.message || "Unexpected server error",
+                rateLimit: error.rateLimit,
+            });
+        }
+    });
+
     app.get("/api/search", auth.optionalAuth, async (req, res) => {
         const input = String(req.query.q || "").trim();
         const parsed = parseGitHubInput(input);
@@ -109,6 +162,9 @@ function createApp() {
                 case "user":
                     result = await github.lookupUser(parsed.owner);
                     break;
+                case "username":
+                    result = await github.lookupUser(parsed.username);
+                    break;
                 case "repo":
                     result = await github.lookupRepo(parsed.owner, parsed.repo);
                     break;
@@ -121,7 +177,6 @@ function createApp() {
                 case "commit":
                     result = await github.lookupCommit(parsed.owner, parsed.repo, parsed.sha);
                     break;
-                case "username":
                 default:
                     result = await github.lookupActivity(parsed.username);
                     break;
