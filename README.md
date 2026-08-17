@@ -14,21 +14,37 @@ A full-stack web application to explore GitHub profiles, repositories, issues, p
 ### Search & discovery
 - 🔍 **Username search** — fetch recent public activity for any GitHub user
 - 🔗 **Link paste support** — paste a GitHub URL for an instant detailed breakdown (auto-searches on paste)
+- ⌨️ **Bare `owner/repo` input** — type `facebook/react`, `facebook/react/issues/42`, `facebook/react/pull/99`, or `facebook/react/commit/abc123` directly — no full URL needed
 - 📋 **Search history** — local history for guests; synced to database when signed in
 
-### Supported link types
-| Link | Example | What you get |
+### Supported inputs
+| Input | Example | What you get |
 |------|---------|--------------|
-| **Profile** | `https://github.com/torvalds` | Avatar, bio, stats, recent activity |
-| **Repository** | `https://github.com/facebook/react` | Stars, forks, language, license, topics |
-| **Issue** | `https://github.com/owner/repo/issues/42` | Title, status, labels, comments |
-| **Pull request** | `https://github.com/owner/repo/pull/99` | Merge status, branches, diff stats |
-| **Commit** | `https://github.com/owner/repo/commit/abc123` | Message, author, additions/deletions |
+| **Profile** | `torvalds` or `https://github.com/torvalds` | Avatar, bio, stats, tabbed insights, recent activity |
+| **Repository** | `facebook/react` or `https://github.com/facebook/react` | Stars, forks, language, license, topics, file tree |
+| **Issue** | `facebook/react/issues/42` | Title, status, labels, comments |
+| **Pull request** | `facebook/react/pull/99` | Merge status, branches, diff stats |
+| **Commit** | `facebook/react/commit/abc123` | Message, author, additions/deletions |
+
+### Profile insights (tabbed blocks)
+Profile results open as clean **tabs** — one feature per block, never everything at once:
+
+- 📊 **Overview** — profile card, stats, bio, links
+- 🗓️ **Heatmap** — GitHub-style 28-week contribution grid
+- 🎨 **Languages** — animated top-languages percentage bars
+- 🗂️ **Repositories** — top repos with stars, language, description
+- 📈 **Activity** — 14-day activity bar graph + filterable event list (All / Pushes / PRs / Issues / Stars / Forks)
+- 🕸️ **Graph** — an interactive **force-directed network**: the user in the center, their repos, PRs and issues connected around them — **drag any node** and the network re-settles with real physics; click a node to open it on GitHub
+
+### Compare & explore
+- ⚖️ **Compare two users** — side-by-side cards + winner-highlighted stat table; one-click from the header
+- ⭐ **Starred repositories** — browse any user's starred repos
+- 🌲 **Repo file tree** — expandable file tree with type icons on repository results
+- 🔗 **Export & share** — export any result as JSON, or copy a shareable link (`?q=...`, `?c=user1|user2`) that auto-runs the search
+- 🎯 **Exact links** — activity items link straight to the exact PR/issue page, not just the repo
 
 ### User accounts
 - 👤 **Register & sign in** — email/password authentication with JWT sessions
-- 🔑 **GitHub OAuth sign-in** — secure "Continue with GitHub" login (PKCE + state) for every GitHub user
-- 🧑‍💻 **Your GitHub account** — after OAuth login the app fetches the user's GitHub profile, repositories, priority overview, and a 14-day activity graph (commits, PRs, issues, reviews, branches)
 - 💾 **Persistent history** — searches saved per user in the database (up to 50 entries)
 - 🔐 **Secure passwords** — bcrypt hashing; tokens expire after 7 days
 
@@ -40,7 +56,8 @@ A full-stack web application to explore GitHub profiles, repositories, issues, p
 - 📊 **Rate limit tracking** — remaining API quota shown in the UI
 
 ### Frontend
-- 🎨 **GitHub dark theme** — responsive layout with gradient accents and animations
+- 🎨 **Modern dark UI** — full-window glassmorphism layout (no narrow column), sticky glass header, gradient accents
+- 🎬 **Animations** — aurora background, cursor spotlight, 3D card tilt, click ripples, staggered card entrances, count-up stats (all respect `prefers-reduced-motion`)
 - ⌨️ **Keyboard support** — press `Enter` to search
 - ⏳ **Loading & error states** — spinner, clear messages, connection status pill
 - 🕐 **Relative timestamps** — activity shown as "2h ago", "3d ago", etc.
@@ -51,7 +68,7 @@ A full-stack web application to explore GitHub profiles, repositories, issues, p
 
 | Layer | Technologies |
 |-------|--------------|
-| **Frontend** | HTML5, CSS3, ES6+ JavaScript |
+| **Frontend** | HTML5, CSS3, ES6+ JavaScript (zero dependencies — SVG graphs & physics are hand-rolled) |
 | **Backend** | Node.js, Express, JWT, bcrypt |
 | **Database** | SQLite (local) / PostgreSQL (production) |
 | **API** | [GitHub REST API](https://docs.github.com/en/rest) |
@@ -95,18 +112,15 @@ DATABASE_URL=
 |----------|----------|-------------|
 | `PORT` | No | Server port (default `3000`) |
 | `GITHUB_TOKEN` | No | GitHub PAT for higher API rate limits |
-| `GITHUB_CLIENT_ID` | No | GitHub OAuth App client ID (enables GitHub sign-in) |
-| `GITHUB_CLIENT_SECRET` | No | GitHub OAuth App client secret |
-| `PUBLIC_BASE_URL` | No | Public URL of your app; used to build the OAuth callback URL |
 | `JWT_SECRET` | Yes (production) | Secret for signing auth tokens |
 | `DATABASE_URL` | No | PostgreSQL connection string; omit for local SQLite |
+| `PGSSL` | No | Set `false` only if your Postgres provider doesn't require SSL |
 
-Create a GitHub token at [github.com/settings/tokens](https://github.com/settings/tokens) — no special scopes are required for public data.
+Create a GitHub token at [github.com/settings/tokens](https://github.com/settings/tokens) — no special scopes are required for public data. Without it the app is limited to 60 GitHub API requests/hour; with it you get 5,000/hour.
 
 ### Run locally
 
 ```bash
-
 npm start
 ```
 
@@ -117,43 +131,20 @@ For development with auto-restart:
 ```bash
 npm run dev
 ```
-īīī
+
 > **Note:** The app requires the backend server. Opening `index.html` directly will not work.
 
 Local SQLite data is stored in `data/app.db` (gitignored).
 
 ### Running tests
 
-The repo ships with automated tests for the GitHub OAuth flow (token encryption, user upsert, PKCE redirect, callback session issuance, CSRF state rejection), the URL parser, and the GitHub API lookup functions (caching, headers, error handling) using Node's built-in test runner:
+The repo ships with automated tests for the input parser (usernames, bare `owner/repo`, deep links), the GitHub API lookup functions (caching, headers, error handling, rate-limit tracking), activity aggregation, and the newer endpoints (compare, starred, repo tree) using Node's built-in test runner:
 
 ```bash
 npm test
 ```
 
 Tests use an in-memory SQLite database, so they never touch your local data. Requires Node 18.8+.
-
-### GitHub OAuth sign-in (optional)
-
-1. Go to [github.com/settings/developers](https://github.com/settings/developers) → **New OAuth App**
-2. Set **Homepage URL** to your app URL (`http://localhost:3000` locally)
-3. Set **Authorization callback URL** to `http://localhost:3000/api/auth/github/callback` (use your public URL in production)
-4. Add the app's **Client ID** and **Client secret** to `.env`:
-
-```env
-GITHUB_CLIENT_ID=your_client_id
-GITHUB_CLIENT_SECRET=your_client_secret
-# Production only: the public URL of the deployed app
-PUBLIC_BASE_URL=https://your-app.onrender.com
-```
-
-5. Restart the server — the auth modal now shows **Continue with GitHub**.
-
-> **Troubleshooting sign-in with GitHub:**
-> - The **Authorization callback URL must match exactly** what the app sends. If it doesn't, GitHub shows a `redirect_uri_mismatch` error. Locally this is `http://localhost:3000/api/auth/github/callback`; in production it is `<your-public-url>/api/auth/github/callback` — or set `GITHUB_REDIRECT_URI` (or `PUBLIC_BASE_URL`) to pin the exact URL the app uses.
-> - Both `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` are required. If either is missing, the button shows "GitHub sign-in is not configured" instead of signing in.
-> - OAuth Apps only allow **one** callback URL (no wildcards), so use the same URL in GitHub settings and in the environment.
-
-After signing in, the app fetches the user's GitHub profile, repositories, a priority overview (red/yellow/green with reasons), and a 14-day activity graph and shows them under **Your GitHub account**. The OAuth access token is encrypted (AES-256-GCM) before being stored in the database and is never sent to the browser.
 
 ---
 
@@ -162,22 +153,30 @@ After signing in, the app fetches the user's GitHub profile, repositories, a pri
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
 | `GET` | `/api/health` | No | Server status, database driver, cache stats |
-| `GET` | `/api/search?q={input}` | Optional | Search by username or GitHub URL |
+| `GET` | `/api/search?q={input}` | Optional | Search by username, `owner/repo`, or GitHub URL |
+| `GET` | `/api/compare?user1={a}&user2={b}` | Optional | Side-by-side stats for two users |
+| `GET` | `/api/user/starred?user={login}` | Optional | Starred repositories for a user |
+| `GET` | `/api/repo/tree?owner={o}&repo={r}` | Optional | File tree of a repository |
 | `POST` | `/api/auth/register` | No | Create account `{ email, name, password }` |
 | `POST` | `/api/auth/login` | No | Sign in `{ email, password }` |
-| `GET` | `/api/auth/github` | No | Start the GitHub OAuth flow (redirects to GitHub) |
-| `GET` | `/api/auth/github/callback` | No | GitHub OAuth callback — exchanges code, signs the user in |
 | `GET` | `/api/auth/me` | Yes | Current user profile |
-| `GET` | `/api/account` | Yes | Authenticated user's GitHub profile + repositories |
 | `GET` | `/api/history` | Yes | User search history |
 | `DELETE` | `/api/history` | Yes | Clear user search history |
 
 **Examples:**
 
 ```bash
-# Search
+# Search (username, owner/repo, or URL)
 curl "http://localhost:3000/api/search?q=octocat"
+curl "http://localhost:3000/api/search?q=facebook/react"
 curl "http://localhost:3000/api/search?q=https://github.com/facebook/react"
+
+# Compare two users
+curl "http://localhost:3000/api/compare?user1=torvalds&user2=gaearon"
+
+# Starred repos + repo file tree
+curl "http://localhost:3000/api/user/starred?user=torvalds"
+curl "http://localhost:3000/api/repo/tree?owner=facebook&repo=react"
 
 # Register
 curl -X POST http://localhost:3000/api/auth/register \
@@ -206,7 +205,7 @@ This repo includes a [`render.yaml`](render.yaml) Blueprint that provisions:
 1. Push this repo to GitHub
 2. Go to [dashboard.render.com](https://dashboard.render.com) → **New** → **Blueprint**
 3. Connect your repository — Render reads `render.yaml` automatically
-4. Add `GITHUB_TOKEN` in the service environment variables (optional but recommended)
+4. Add `GITHUB_TOKEN` in the service environment variables (optional but recommended — 5,000 req/hr instead of 60)
 5. Deploy — your app will be live at `https://your-app.onrender.com`
 
 ### Vercel
@@ -226,7 +225,7 @@ This repo includes [`vercel.json`](vercel.json) for serverless deployment.
 npx vercel
 ```
 
-> **Vercel note:** Use an external PostgreSQL database (`DATABASE_URL`). SQLite does not work on Vercel's serverless runtime.
+> **Vercel note:** Use an external PostgreSQL database (`DATABASE_URL`). SQLite does not work on Vercel's serverless runtime (read-only filesystem), which crashes the app with a 500.
 
 ---
 
@@ -235,18 +234,22 @@ npx vercel
 ```
 Github-User-Activity/
 ├── server.js          # Local server entry point
-├── app.js             # Express app factory
+├── app.js             # Express app factory & all API routes
 ├── api/
 │   └── index.js       # Vercel serverless handler
 ├── lib/
+│   ├── activity.js    # Activity aggregation & graphs data
+│   ├── ai.js          # AI helpers
 │   ├── auth.js        # JWT auth & user management
 │   ├── cache.js       # Memory + DB API cache
 │   ├── db.js          # SQLite / PostgreSQL adapter
-│   ├── github.js      # GitHub API client
-│   └── parser.js      # Username / URL parser
+│   ├── github.js      # GitHub API client (lookups, compare, starred, trees)
+│   ├── parser.js      # Username / owner-repo / URL parser
+│   └── tracing.js     # Request tracing helpers
+├── tests/             # Node test-runner suite (parser, lookups, endpoints)
 ├── index.html         # App markup
-├── style.css          # Styling
-├── script.js          # Frontend logic
+├── style.css          # Styling & animations
+├── script.js          # Frontend logic (tabs, graphs, compare, heatmap, …)
 ├── render.yaml        # Render Blueprint
 ├── vercel.json        # Vercel config
 ├── package.json

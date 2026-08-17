@@ -116,9 +116,9 @@ test("parses bare owner/repo deep paths", () => {
 });
 
 test("rejects invalid bare owner/repo shapes", () => {
-    assert.deepStrictEqual(parseGitHubInput("/"), { type: "username", username: "/" });
+    assert.deepStrictEqual(parseGitHubInput("/"), { type: "invalid" });
     assert.deepStrictEqual(parseGitHubInput("foo//bar"), { type: "repo", owner: "foo", repo: "bar" });
-    assert.deepStrictEqual(parseGitHubInput("has space/name"), { type: "username", username: "has space/name" });
+    assert.deepStrictEqual(parseGitHubInput("has space/name"), { type: "invalid" });
 });
 
 test("falls back to a repo for unmatched deep links", () => {

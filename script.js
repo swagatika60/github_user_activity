@@ -574,6 +574,7 @@ function renderUser(data) {
             label: "Activity",
             body: `${data.activityGraph ? renderActivityGraph(data.activityGraph) : ""}${renderActivityListWithFilters(data.events || [], "Recent Activity")}`,
         },
+        { key: "graph", label: "Graph", body: '<div class="graph-tab" data-graph-host></div>' },
     ];
 
     const tabBar = tabs
@@ -987,6 +988,10 @@ async function getActivity() {
             throw new Error(data.error || "Search failed");
         }
 
+        if (window.__graphLoop) {
+            cancelAnimationFrame(window.__graphLoop);
+            window.__graphLoop = null;
+        }
         window.__lastResult = { query: input, data };
 
         await saveHistory(input);
@@ -1410,6 +1415,13 @@ function handleOutputClick(event) {
         if (!panels) return;
         tabBar.querySelectorAll(".result-tab").forEach((btn) => btn.classList.toggle("active", btn === tabBtn));
         panels.querySelectorAll(".tab-panel").forEach((panel) => panel.classList.toggle("active", panel.dataset.panel === tabBtn.dataset.tab));
+        if (window.__graphLoop) {
+            cancelAnimationFrame(window.__graphLoop);
+            window.__graphLoop = null;
+        }
+        if (tabBtn.dataset.tab === "graph") {
+            buildActivityGraph(panels.querySelector('[data-panel="graph"]'));
+        }
         return;
     }
 
@@ -1450,4 +1462,436 @@ async function handleUrlParams() {
         document.getElementById("username").value = q;
         await getActivity();
     }
+}
+
+/* ------------------------------------------------------------------ *
+ * Activity Graph — structured radial network with physics            *
+ *   Center: user · Ring: repos · Outer ring: PRs/issues · draggable *
+ * ------------------------------------------------------------------ */
+function buildActivityGraph(host) {
+    if (!host) return;
+    if (window.__graphLoop) {
+        cancelAnimationFrame(window.__graphLoop);
+        window.__graphLoop = null;
+    }
+
+    const data = window.__lastResult?.data;
+    if (!data || data.type !== "user" || !data.profile) {
+        host.innerHTML = '<div class="empty-state">Search a user to see their activity graph.</div>';
+        return;
+    }
+
+    const NS = "http://www.w3.org/2000/svg";
+    const profile = data.profile;
+    const uid = "ag" + Math.random().toString(36).slice(2, 8);
+    const W = Math.max(host.clientWidth, 320);
+    const H = Math.max(host.clientHeight - 60, 460);
+    const cx = W / 2;
+    const cy = H / 2;
+
+    /* ---- nodes ---- */
+    const nodes = [];
+    const nodeMap = new Map();
+    const addNode = (n) => {
+        nodeMap.set(n.id, n);
+        nodes.push(n);
+    };
+
+    addNode({
+        id: "user",
+        kind: "user",
+        label: "@" + profile.login,
+        r: 32,
+        x: cx,
+        y: cy,
+        vx: 0,
+        vy: 0,
+        url: profile.html_url,
+        avatar: profile.avatar_url,
+    });
+
+    const repos = (data.repos || []).slice(0, 10);
+    repos.forEach((repo) => {
+        addNode({
+            id: "repo-" + repo.full_name,
+            kind: "repo",
+            label: repo.full_name.split("/")[1],
+            r: 17,
+            x: cx,
+            y: cy,
+            vx: 0,
+            vy: 0,
+            url: repo.html_url,
+            full: repo.full_name,
+            stars: repo.stargazers_count || 0,
+        });
+    });
+
+    const seenPR = new Set();
+    const seenIssue = new Set();
+    let prCount = 0;
+    let issueCount = 0;
+    for (const e of data.events || []) {
+        const repoName = e.repo?.name;
+        const pr = e.payload?.pull_request;
+        const issue = e.payload?.issue;
+        if (!repoName) continue;
+        if ((e.type === "PullRequestEvent" || e.type === "PullRequestReviewEvent") && pr?.number) {
+            const key = repoName + "#" + pr.number;
+            if (seenPR.has(key) || prCount >= 8 || !nodeMap.has("repo-" + repoName)) continue;
+            seenPR.add(key);
+            prCount++;
+            addNode({
+                id: "pr-" + key,
+                kind: "pr",
+                label: "#" + pr.number,
+                r: 11,
+                x: cx,
+                y: cy,
+                vx: 0,
+                vy: 0,
+                url: pr.html_url || `https://github.com/${repoName}/pull/${pr.number}`,
+                parent: "repo-" + repoName,
+                title: `PR #${pr.number} in ${repoName} — ${pr.title || ""}`.slice(0, 80),
+            });
+        } else if ((e.type === "IssuesEvent" || e.type === "IssueCommentEvent") && issue?.number) {
+            const key = repoName + "#" + issue.number;
+            if (seenIssue.has(key) || issueCount >= 8 || !nodeMap.has("repo-" + repoName)) continue;
+            seenIssue.add(key);
+            issueCount++;
+            addNode({
+                id: "issue-" + key,
+                kind: "issue",
+                label: "#" + issue.number,
+                r: 11,
+                x: cx,
+                y: cy,
+                vx: 0,
+                vy: 0,
+                url: issue.html_url || `https://github.com/${repoName}/issues/${issue.number}`,
+                parent: "repo-" + repoName,
+                title: `Issue #${issue.number} in ${repoName} — ${issue.title || ""}`.slice(0, 80),
+            });
+        }
+    }
+
+    /* ---- edges ---- */
+    const edges = [];
+    for (const n of nodes) {
+        if (n.kind === "repo") edges.push({ a: "user", b: n.id, rest: 150, kind: "repo" });
+        else if (n.parent) edges.push({ a: n.parent, b: n.id, rest: 88, kind: n.kind });
+    }
+
+    /* ---- structured layout: "solar system" ----
+       user at center → repos on a clean ring → PRs/issues on an outer ring */
+    const repoNodes = nodes.filter((n) => n.kind === "repo");
+    const ringR = Math.min(215, Math.max(130, 120 + repoNodes.length * 12));
+    repoNodes.forEach((n, i) => {
+        const angle = (i / Math.max(repoNodes.length, 1)) * Math.PI * 2 - Math.PI / 2;
+        n.angle = angle;
+        n.home = {
+            x: Math.max(60, Math.min(W - 60, cx + Math.cos(angle) * ringR)),
+            y: Math.max(70, Math.min(H - 70, cy + Math.sin(angle) * ringR)),
+        };
+        n.x = n.home.x;
+        n.y = n.home.y;
+    });
+
+    /* group leaves per repo, fan them out along the outer ring */
+    const leavesByParent = new Map();
+    for (const n of nodes) {
+        if (!n.parent) continue;
+        if (!leavesByParent.has(n.parent)) leavesByParent.set(n.parent, []);
+        leavesByParent.get(n.parent).push(n);
+    }
+    for (const [parentId, leaves] of leavesByParent) {
+        const parent = nodeMap.get(parentId);
+        if (!parent) continue;
+        leaves.forEach((n, i) => {
+            const span = Math.min(0.8, leaves.length * 0.09);
+            const angle = (parent.angle ?? 0) + (i - (leaves.length - 1) / 2) * span;
+            n.home = {
+                x: Math.max(45, Math.min(W - 45, cx + Math.cos(angle) * (ringR + 96))),
+                y: Math.max(60, Math.min(H - 60, cy + Math.sin(angle) * (ringR + 96))),
+            };
+            n.x = n.home.x;
+            n.y = n.home.y;
+        });
+    }
+
+    /* ---- label pill helper ---- */
+    const pill = (text, y) => {
+        const w = Math.min(String(text).length, 14) * 6.2 + 18;
+        return `
+            <rect class="graph-label-pill" x="${-w / 2}" y="${y - 14}" width="${w}" height="18" rx="9"/>
+            <text class="graph-label" y="${y - 1}" text-anchor="middle">${escapeHtml(String(text).slice(0, 14))}</text>`;
+    };
+
+    /* ---- build svg ---- */
+    const svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("class", "activity-graph");
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    svg.setAttribute("aria-label", `Activity graph for ${profile.login}`);
+    svg.innerHTML = `
+        <defs>
+            <filter id="${uid}-blur" x="-80%" y="-80%" width="260%" height="260%">
+                <feGaussianBlur stdDeviation="7"/>
+            </filter>
+            <radialGradient id="${uid}-user" cx="35%" cy="35%" r="80%">
+                <stop offset="0%" stop-color="#c084fc"/>
+                <stop offset="55%" stop-color="#7c3aed"/>
+                <stop offset="100%" stop-color="#4c1d95"/>
+            </radialGradient>
+            <radialGradient id="${uid}-repo" cx="35%" cy="35%" r="80%">
+                <stop offset="0%" stop-color="#58a6ff"/>
+                <stop offset="100%" stop-color="#1f6feb"/>
+            </radialGradient>
+            <radialGradient id="${uid}-pr" cx="35%" cy="35%" r="80%">
+                <stop offset="0%" stop-color="#c084fc"/>
+                <stop offset="100%" stop-color="#8957e5"/>
+            </radialGradient>
+            <radialGradient id="${uid}-issue" cx="35%" cy="35%" r="80%">
+                <stop offset="0%" stop-color="#e3b341"/>
+                <stop offset="100%" stop-color="#a8871d"/>
+            </radialGradient>
+            <clipPath id="${uid}-clip"><circle cx="0" cy="0" r="29"/></clipPath>
+        </defs>
+        <circle class="graph-guide" cx="${cx}" cy="${cy}" r="${ringR}"/>
+        <circle class="graph-guide" cx="${cx}" cy="${cy}" r="${ringR + 96}"/>
+        <g class="graph-edges"></g>
+        <g class="graph-nodes"></g>`;
+
+    const edgesG = svg.querySelector(".graph-edges");
+    const nodesG = svg.querySelector(".graph-nodes");
+    const edgeEls = edges.map((e) => {
+        const path = document.createElementNS(NS, "path");
+        path.setAttribute("class", "graph-edge graph-edge-" + e.kind);
+        edgesG.appendChild(path);
+        return path;
+    });
+
+    const edgePath = (a, b) => {
+        const mx = (a.x + b.x) / 2;
+        const my = (a.y + b.y) / 2;
+        let dx = b.x - a.x;
+        let dy = b.y - a.y;
+        const d = Math.hypot(dx, dy) || 1;
+        const bow = Math.min(24, d * 0.1);
+        const cxp = mx - (dy / d) * bow;
+        const cyp = my + (dx / d) * bow;
+        return `M${a.x.toFixed(1)},${a.y.toFixed(1)} Q${cxp.toFixed(1)},${cyp.toFixed(1)} ${b.x.toFixed(1)},${b.y.toFixed(1)}`;
+    };
+
+    const nodeEls = {};
+    for (const n of nodes) {
+        const g = document.createElementNS(NS, "g");
+        g.setAttribute("class", "graph-node graph-node-" + n.kind);
+        g.setAttribute("data-id", n.id);
+        const titleEl = document.createElementNS(NS, "title");
+        titleEl.textContent = n.title || n.full || n.label || "";
+        g.appendChild(titleEl);
+
+        let inner;
+        if (n.kind === "user") {
+            inner = `
+                <g class="graph-node-scale">
+                    <circle class="graph-user-halo" r="44" fill="url(#${uid}-user)" filter="url(#${uid}-blur)" opacity="0.55"/>
+                    <circle class="graph-node-ring" r="32" fill="url(#${uid}-user)"/>
+                    <circle class="graph-ring-stroke" r="32"/>
+                    <image href="${n.avatar}" width="58" height="58" x="-29" y="-29" clip-path="url(#${uid}-clip)"/>
+                    ${pill(n.label, 54)}
+                </g>`;
+        } else if (n.kind === "repo") {
+            inner = `
+                <g class="graph-node-scale">
+                    <circle class="graph-node-circle" r="17" fill="url(#${uid}-repo)"/>
+                    <circle class="graph-node-inner" r="9" fill="rgba(255,255,255,0.16)"/>
+                    ${n.stars ? `<text class="graph-star" x="12" y="-7">★</text>` : ""}
+                    ${pill(n.label.split("/").pop(), 38)}
+                </g>`;
+        } else {
+            const fill = n.kind === "pr" ? `url(#${uid}-pr)` : `url(#${uid}-issue)`;
+            inner = `
+                <g class="graph-node-scale">
+                    <circle class="graph-node-circle" r="11" fill="${fill}"/>
+                    ${pill(n.label, 29)}
+                </g>`;
+        }
+        g.innerHTML = inner;
+        g.setAttribute("transform", `translate(${n.x.toFixed(1)},${n.y.toFixed(1)})`);
+        nodesG.appendChild(g);
+        nodeEls[n.id] = g;
+
+        /* hover: highlight this node + its edges, dim everything else */
+        g.addEventListener("pointerenter", () => {
+            const linked = new Set([n.id]);
+            for (const e of edges) {
+                if (e.a === n.id || e.b === n.id) {
+                    linked.add(e.a);
+                    linked.add(e.b);
+                }
+            }
+            for (const other of nodes) {
+                nodeEls[other.id].classList.toggle("is-dimmed", !linked.has(other.id));
+            }
+            edgeEls.forEach((el, i) => {
+                el.classList.toggle("is-dimmed", !(edges[i].a === n.id || edges[i].b === n.id));
+            });
+        });
+        g.addEventListener("pointerleave", () => {
+            for (const other of nodes) nodeEls[other.id].classList.remove("is-dimmed");
+            edgeEls.forEach((el) => el.classList.remove("is-dimmed"));
+        });
+    }
+
+    /* ---- legend ---- */
+    const legend = document.createElement("div");
+    legend.setAttribute("class", "graph-legend");
+    legend.innerHTML = `
+        <span class="graph-legend-item"><i class="graph-legend-dot" style="background:linear-gradient(135deg,#c084fc,#7c3aed)"></i><b>${escapeHtml(profile.login)}</b></span>
+        <span class="graph-legend-item"><i class="graph-legend-dot" style="background:linear-gradient(135deg,#58a6ff,#1f6feb)"></i>Repositories <b>${repos.length}</b></span>
+        <span class="graph-legend-item"><i class="graph-legend-dot" style="background:linear-gradient(135deg,#c084fc,#8957e5)"></i>Pull requests <b>${prCount}</b></span>
+        <span class="graph-legend-item"><i class="graph-legend-dot" style="background:linear-gradient(135deg,#e3b341,#a8871d)"></i>Issues <b>${issueCount}</b></span>
+        <span class="graph-legend-hint">Drag to explore · click to open · hover to trace</span>`;
+
+    host.innerHTML = "";
+    host.appendChild(svg);
+    host.appendChild(legend);
+
+    /* ---- physics ---- */
+    let draggedNode = null;
+    let dragOffset = { x: 0, y: 0 };
+    let moved = 0;
+
+    const toLocal = (ev) => {
+        const rect = svg.getBoundingClientRect();
+        const sx = W / (rect.width || 1);
+        const sy = H / (rect.height || 1);
+        return { x: (ev.clientX - rect.left) * sx, y: (ev.clientY - rect.top) * sy };
+    };
+
+    svg.addEventListener("pointerdown", (ev) => {
+        const g = ev.target.closest(".graph-node");
+        if (!g) return;
+        const n = nodeMap.get(g.dataset.id);
+        if (!n) return;
+        ev.preventDefault();
+        const p = toLocal(ev);
+        draggedNode = n;
+        dragOffset = { x: p.x - n.x, y: p.y - n.y };
+        moved = 0;
+        svg.classList.add("graph-dragging");
+        try {
+            svg.setPointerCapture(ev.pointerId);
+        } catch (_e) { /* ignore */ }
+    });
+
+    svg.addEventListener("pointermove", (ev) => {
+        if (!draggedNode) return;
+        const p = toLocal(ev);
+        const nx = p.x - dragOffset.x;
+        const ny = p.y - dragOffset.y;
+        moved += Math.hypot(nx - draggedNode.x, ny - draggedNode.y);
+        draggedNode.x = nx;
+        draggedNode.y = ny;
+        draggedNode.vx = 0;
+        draggedNode.vy = 0;
+    });
+
+    svg.addEventListener("pointerup", (ev) => {
+        if (!draggedNode) return;
+        const n = draggedNode;
+        draggedNode = null;
+        svg.classList.remove("graph-dragging");
+        try {
+            svg.releasePointerCapture(ev.pointerId);
+        } catch (_e) { /* ignore */ }
+        if (moved < 6 && n.url) window.open(n.url, "_blank", "noopener");
+    });
+
+    const userNode = nodeMap.get("user");
+    const step = () => {
+        /* repulsion between every pair (soft — keeps the ring readable) */
+        for (let i = 0; i < nodes.length; i++) {
+            const a = nodes[i];
+            if (a === draggedNode) continue;
+            for (let j = i + 1; j < nodes.length; j++) {
+                const b = nodes[j];
+                if (b === draggedNode) continue;
+                let dx = b.x - a.x;
+                let dy = b.y - a.y;
+                const d = Math.hypot(dx, dy) || 1;
+                const f = ((a.r + b.r) * 750) / (d * d);
+                const fx = (dx / d) * f;
+                const fy = (dy / d) * f;
+                a.vx -= fx;
+                a.vy -= fy;
+                b.vx += fx;
+                b.vy += fy;
+            }
+        }
+        /* springs along edges */
+        for (const e of edges) {
+            const a = nodeMap.get(e.a);
+            const b = nodeMap.get(e.b);
+            if (!a || !b) continue;
+            let dx = b.x - a.x;
+            let dy = b.y - a.y;
+            const d = Math.hypot(dx, dy) || 1;
+            const f = (d - e.rest) * 0.02;
+            const fx = (dx / d) * f;
+            const fy = (dy / d) * f;
+            a.vx += fx;
+            a.vy += fy;
+            b.vx -= fx;
+            b.vy -= fy;
+        }
+        /* strong "home" pull — keeps the solar-system structure intact */
+        for (const n of nodes) {
+            if (!n.home) continue;
+            const k = n.kind === "user" ? 0.06 : n.kind === "repo" ? 0.055 : 0.05;
+            n.vx += (n.home.x - n.x) * k;
+            n.vy += (n.home.y - n.y) * k;
+        }
+
+        /* integrate */
+        for (const n of nodes) {
+            if (n === draggedNode) continue;
+            n.vx *= 0.84;
+            n.vy *= 0.84;
+            const speed = Math.hypot(n.vx, n.vy);
+            const maxSpeed = 8;
+            if (speed > maxSpeed) {
+                n.vx = (n.vx / speed) * maxSpeed;
+                n.vy = (n.vy / speed) * maxSpeed;
+            }
+            n.x += n.vx;
+            n.y += n.vy;
+            n.x = Math.max(20, Math.min(W - 20, n.x));
+            n.y = Math.max(20, Math.min(H - 20, n.y));
+        }
+
+        /* render curved edges + node positions */
+        for (let i = 0; i < edges.length; i++) {
+            const e = edges[i];
+            const a = nodeMap.get(e.a);
+            const b = nodeMap.get(e.b);
+            if (a && b) edgeEls[i].setAttribute("d", edgePath(a, b));
+        }
+        for (const n of nodes) {
+            nodeEls[n.id].setAttribute("transform", `translate(${n.x.toFixed(1)},${n.y.toFixed(1)})`);
+        }
+        window.__graphLoop = requestAnimationFrame(step);
+    };
+    window.__graphLoop = requestAnimationFrame(step);
+
+    /* rebuild on resize while the tab is alive */
+    const onResize = () => {
+        if (!document.body.contains(host)) {
+            window.removeEventListener("resize", onResize);
+            return;
+        }
+        buildActivityGraph(host);
+    };
+    window.addEventListener("resize", onResize);
 }

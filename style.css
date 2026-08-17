@@ -2637,3 +2637,229 @@ html {
         scroll-behavior: auto;
     }
 }
+
+/* ---------------------------------------------------------------- *
+ * Activity Graph — structured radial network                        *
+ * ---------------------------------------------------------------- */
+.graph-tab {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 560px;
+}
+
+.activity-graph {
+    flex: 1;
+    width: 100%;
+    min-height: 480px;
+    display: block;
+    touch-action: none;
+    user-select: none;
+    border-radius: 16px;
+    background:
+        radial-gradient(ellipse at 50% 0%, rgba(110, 72, 201, 0.1), transparent 62%),
+        radial-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+    background-size: 100% 100%, 22px 22px;
+}
+
+/* faint structure guides (the two rings) */
+.graph-guide {
+    fill: none;
+    stroke: rgba(88, 166, 255, 0.12);
+    stroke-dasharray: 2 7;
+    stroke-width: 1;
+}
+
+/* edges */
+.graph-edge {
+    fill: none;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    transition: opacity 0.18s ease, stroke 0.18s ease;
+}
+
+.graph-edge-repo {
+    stroke: rgba(88, 166, 255, 0.5);
+}
+
+.graph-edge-pr {
+    stroke: rgba(163, 113, 247, 0.6);
+    stroke-dasharray: 5 6;
+    animation: graph-flow 0.9s linear infinite;
+}
+
+.graph-edge-issue {
+    stroke: rgba(210, 153, 34, 0.6);
+    stroke-dasharray: 5 6;
+    animation: graph-flow 0.9s linear infinite;
+}
+
+@keyframes graph-flow {
+    to {
+        stroke-dashoffset: -22;
+    }
+}
+
+/* hover tracing: dim everything not connected */
+.graph-node.is-dimmed {
+    opacity: 0.22;
+    transition: opacity 0.18s ease;
+}
+
+.graph-edge.is-dimmed {
+    opacity: 0.1;
+}
+
+/* nodes */
+.graph-node {
+    cursor: grab;
+}
+
+.activity-graph.graph-dragging .graph-node {
+    cursor: grabbing;
+}
+
+.graph-node-scale {
+    transform-box: fill-box;
+    transform-origin: center;
+    transition: transform 0.18s ease;
+}
+
+.graph-node:hover .graph-node-scale {
+    transform: scale(1.16);
+}
+
+.graph-node-circle,
+.graph-node-ring {
+    stroke: rgba(255, 255, 255, 0.85);
+    stroke-width: 2;
+    transition: filter 0.2s ease;
+}
+
+.graph-node:hover .graph-node-circle,
+.graph-node:hover .graph-node-ring {
+    filter: drop-shadow(0 0 10px currentColor);
+}
+
+.graph-node-repo {
+    color: #58a6ff;
+}
+
+.graph-node-pr {
+    color: #a371f7;
+}
+
+.graph-node-issue {
+    color: #e3b341;
+}
+
+.graph-node-user {
+    color: #a371f7;
+}
+
+/* avatar ring + pulsing halo */
+.graph-ring-stroke {
+    fill: none;
+    stroke: rgba(255, 255, 255, 0.85);
+    stroke-width: 2;
+}
+
+.graph-user-halo {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: graph-pulse 3s ease-in-out infinite;
+}
+
+@keyframes graph-pulse {
+    0%, 100% {
+        transform: scale(1);
+        opacity: 0.5;
+    }
+    50% {
+        transform: scale(1.16);
+        opacity: 0.24;
+    }
+}
+
+/* star badge on repo nodes */
+.graph-star {
+    fill: #f0b429;
+    font-size: 11px;
+    filter: drop-shadow(0 0 4px rgba(240, 180, 41, 0.8));
+    pointer-events: none;
+}
+
+/* label pills */
+.graph-label-pill {
+    fill: rgba(13, 17, 23, 0.88);
+    stroke: rgba(255, 255, 255, 0.1);
+    stroke-width: 1;
+    pointer-events: none;
+}
+
+.graph-label {
+    fill: #e6edf3;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    pointer-events: none;
+}
+
+/* legend */
+.graph-legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 14px 22px;
+    padding: 12px 4px 4px;
+    font-size: 12.5px;
+    color: #8b949e;
+}
+
+.graph-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 999px;
+    padding: 4px 12px;
+}
+
+.graph-legend-item b {
+    color: #e6edf3;
+    font-weight: 600;
+}
+
+.graph-legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    box-shadow: 0 0 8px rgba(255, 255, 255, 0.15);
+}
+
+.graph-legend-hint {
+    margin-left: auto;
+    opacity: 0.7;
+    font-style: italic;
+}
+
+@media (max-width: 640px) {
+    .graph-legend-hint {
+        margin-left: 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .graph-edge-pr,
+    .graph-edge-issue {
+        animation: none;
+    }
+    .graph-user-halo {
+        animation: none;
+    }
+    .graph-node-scale {
+        transition: none;
+    }
+}
