@@ -3,7 +3,6 @@ const AUTH_TOKEN_KEY = "github-viewer-token";
 const MAX_HISTORY = 8;
 
 let currentUser = null;
-let githubOAuthConfigured = false;
 
 document.addEventListener("DOMContentLoaded", () => {
     const input = document.getElementById("username");
@@ -52,17 +51,6 @@ function setupAuthUI() {
     document.getElementById("open-auth").addEventListener("click", () => openAuthModal("login"));
     document.getElementById("close-auth").addEventListener("click", closeAuthModal);
     document.getElementById("auth-backdrop").addEventListener("click", closeAuthModal);
-    document.getElementById("github-oauth-btn").addEventListener("click", () => {
-        if (!githubOAuthConfigured) {
-            const errorEl = document.getElementById("github-oauth-error");
-            errorEl.textContent =
-                "GitHub sign-in is not configured on this server. The admin needs to add GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET.";
-            errorEl.hidden = false;
-            return;
-        }
-        window.location.href = "/api/auth/github";
-    });
-
     document.querySelectorAll(".auth-tab").forEach((tab) => {
         tab.addEventListener("click", () => switchAuthTab(tab.dataset.tab));
     });
@@ -73,7 +61,6 @@ function setupAuthUI() {
 
 function openAuthModal(tab = "login") {
     document.getElementById("auth-modal").hidden = false;
-    document.getElementById("github-oauth-error").hidden = true;
     switchAuthTab(tab);
 }
 
@@ -116,7 +103,6 @@ async function handleLogin(event) {
         currentUser = data.user;
         updateAuthUI();
         closeAuthModal();
-        renderGitHubAccount();
         await renderHistory();
     } catch (error) {
         errorEl.textContent = error.message;
@@ -145,7 +131,6 @@ async function handleRegister(event) {
         currentUser = data.user;
         updateAuthUI();
         closeAuthModal();
-        renderGitHubAccount();
         await renderHistory();
     } catch (error) {
         errorEl.textContent = error.message;
@@ -170,7 +155,6 @@ async function restoreSession() {
     }
 
     updateAuthUI();
-    await renderGitHubAccount();
 }
 
 function logout() {
@@ -178,11 +162,6 @@ function logout() {
     currentUser = null;
     updateAuthUI();
     renderHistory();
-    const githubSection = document.getElementById("github-section");
-    if (githubSection) {
-        githubSection.hidden = true;
-        document.getElementById("github-account-output").innerHTML = "";
-    }
 }
 
 function updateAuthUI() {
@@ -211,7 +190,6 @@ async function checkHealth() {
         const response = await fetch("/api/health");
         if (!response.ok) throw new Error("offline");
         const data = await response.json();
-        githubOAuthConfigured = Boolean(data.githubOAuth);
         dot.classList.add("online");
         const dbLabel = data.database === "postgres" ? "PostgreSQL" : "SQLite";
         text.textContent = data.githubToken
@@ -824,85 +802,6 @@ function renderReposSection(repos) {
         <h2 class="section-title">Repositories</h2>
         <div class="repo-grid">${cards}</div>
         ${extra > 0 ? `<p class="detail-muted">+ ${extra} more repositories</p>` : ""}`;
-}
-
-function renderAccountSkeleton() {
-    return `
-        <div class="skeleton skeleton-banner"></div>
-        <div class="skeleton-card">
-            <div class="skeleton-row">
-                <div class="skeleton skeleton-avatar"></div>
-                <div class="skeleton-lines">
-                    <div class="skeleton skeleton-line w60"></div>
-                    <div class="skeleton skeleton-line w40"></div>
-                </div>
-            </div>
-            <div class="skeleton-grid">
-                <div class="skeleton skeleton-stat"></div>
-                <div class="skeleton skeleton-stat"></div>
-                <div class="skeleton skeleton-stat"></div>
-            </div>
-        </div>
-        <div class="skeleton-cards">
-            <div class="skeleton skeleton-card-sm"></div>
-            <div class="skeleton skeleton-card-sm"></div>
-            <div class="skeleton skeleton-card-sm"></div>
-        </div>`;
-}
-
-function githubAccountSections(data) {
-    const profile = data.profile;
-    const activityEvents = data.recentActivity.map(formatActivityMessage);
-
-    return [
-        renderPriorityBanner(data.priority),
-        data.topActions?.length ? renderTopActions(data.topActions) : "",
-        renderFlowDiagram(data),
-        profileCardHtml(profile),
-        renderReposSection(data.repos),
-        renderPriorityList(data.openPRs, "Open pull requests", "No open pull requests."),
-        renderPriorityList(data.reviewRequests, "PR Review Queue", "No PRs waiting for your review."),
-        renderPriorityList(data.assignedIssues, "Assigned issues", "No assigned issues."),
-        data.activityGraph ? renderActivityGraph(data.activityGraph) : "",
-        renderActivityList(activityEvents, "Recent activity"),
-    ].filter(Boolean);
-}
-
-async function renderGitHubAccount() {
-    const section = document.getElementById("github-section");
-    const output = document.getElementById("github-account-output");
-
-    if (!currentUser || !currentUser.github_login) {
-        section.hidden = true;
-        output.innerHTML = "";
-        return;
-    }
-
-    section.hidden = false;
-    output.innerHTML = renderAccountSkeleton();
-
-    try {
-        const response = await apiFetch("/api/account");
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || "Failed to load your GitHub account");
-
-        // Render sections progressively so the priority summary and top actions
-        // appear first, then the rest fills in without blocking the UI.
-        const parts = githubAccountSections(data);
-        output.innerHTML = "";
-        let index = 0;
-        const renderNext = () => {
-            if (index >= parts.length) return;
-            output.insertAdjacentHTML("beforeend", parts[index]);
-            index += 1;
-            requestAnimationFrame(renderNext);
-        };
-        requestAnimationFrame(renderNext);
-
-        updateRateLimitFooter(data.rateLimit);
-    } catch (error) {
-        output.innerHTML = `<div class="error-message">${escapeHtml(error.message)}</div>`;
-    }
 }
 
 function showLoading() {

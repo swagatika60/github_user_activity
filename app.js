@@ -6,7 +6,6 @@ const github = require("./lib/github");
 const cache = require("./lib/cache");
 const db = require("./lib/db");
 const auth = require("./lib/auth");
-const oauth = require("./lib/oauth");
 
 function createApp() {
     const app = express();
@@ -19,7 +18,6 @@ function createApp() {
         res.json({
             status: "ok",
             githubToken: Boolean(process.env.GITHUB_TOKEN),
-            githubOAuth: oauth.isConfigured(),
             database: db.getDriver(),
             cache: cache.stats(),
         });
@@ -72,21 +70,6 @@ function createApp() {
             res.json({ ok: true });
         } catch (error) {
             res.status(500).json({ error: error.message });
-        }
-    });
-
-    app.get("/api/auth/github", oauth.startOAuth);
-    app.get("/api/auth/github/callback", oauth.handleCallback);
-
-    app.get("/api/account", auth.authMiddleware, async (req, res) => {
-        try {
-            const result = await oauth.fetchAccount(req.user.id);
-            res.json(result);
-        } catch (error) {
-            res.status(error.status || 500).json({
-                error: error.message || "Unexpected server error",
-                rateLimit: error.rateLimit,
-            });
         }
     });
 

@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node --test --expose-gc tests/oauth-unit.test.js tests/oauth-flow.test.js tests/parser.test.js tests/github-lookup.test.js tests/github-token.test.js tests/priority.test.js tests/activity.test.js tests/features-endpoints.test.js"
+    "test": "node --test --expose-gc tests/parser.test.js tests/github-lookup.test.js tests/github-token.test.js tests/activity.test.js tests/features-endpoints.test.js"
   },
   "engines": {
     "node": ">=18"
