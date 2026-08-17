@@ -2379,3 +2379,261 @@ body::after {
         animation: none;
     }
 }
+
+/* ===========================================================================
+   Full-window layout — use all available space instead of a narrow column
+   =========================================================================== */
+
+.app {
+    max-width: 100%;
+}
+
+@media (min-width: 1200px) {
+    body {
+        padding: 28px clamp(24px, 3vw, 56px) 48px;
+    }
+}
+
+/* On wide screens spread the profile card across two columns: profile info
+   on the left, stats on the right, detail rows spanning underneath. */
+@media (min-width: 1000px) {
+    .hero-card {
+        display: grid;
+        grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+        gap: 24px;
+    }
+
+    .hero-card .profile-header {
+        grid-column: 1;
+    }
+
+    .hero-card .stats-grid {
+        grid-column: 2;
+        grid-row: 1;
+        align-content: start;
+    }
+
+    .hero-card .detail-row {
+        grid-column: 1 / -1;
+    }
+}
+
+/* Denser repo grid so wide screens show more cards per row. */
+.repo-grid {
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+}
+
+/* Wider stat cells that spread across available space. */
+.stats-grid {
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+}
+
+/* ===========================================================================
+   Modern design system — clear hierarchy, cohesive components
+   =========================================================================== */
+
+/* Sticky glass header */
+.app-header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    margin: -8px -12px 26px;
+    padding: 14px 16px;
+    border-radius: 16px;
+    background: rgba(13, 17, 23, 0.72);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(48, 54, 61, 0.55);
+}
+
+.header-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #c9d1d9;
+    background: rgba(22, 27, 34, 0.9);
+    border: 1px solid rgba(48, 54, 61, 0.9);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: border-color 0.18s ease, color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.header-action-btn:hover {
+    color: #58a6ff;
+    border-color: rgba(88, 166, 255, 0.55);
+    box-shadow: 0 6px 16px rgba(88, 166, 255, 0.16);
+    transform: translateY(-1px);
+}
+
+.header-action-btn svg {
+    width: 14px;
+    height: 14px;
+}
+
+/* Search bar — icon, clear button, hint */
+.search-box {
+    position: relative;
+}
+
+.search-icon {
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 16px;
+    height: 16px;
+    color: #8b949e;
+    pointer-events: none;
+}
+
+.search-box input {
+    padding-left: 42px;
+    padding-right: 88px;
+}
+
+.search-clear {
+    position: absolute;
+    right: 92px;
+    top: 50%;
+    transform: translateY(-50%);
+    border: none;
+    background: none;
+    color: #8b949e;
+    font-size: 1.25rem;
+    line-height: 1;
+    padding: 4px 8px;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.search-clear:hover {
+    color: #c9d1d9;
+    background: rgba(139, 148, 158, 0.16);
+}
+
+.search-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.search-hint {
+    font-size: 0.78rem;
+    color: #8b949e;
+}
+
+.search-hint kbd {
+    display: inline-block;
+    padding: 1px 6px;
+    font-size: 0.72rem;
+    font-family: inherit;
+    color: #c9d1d9;
+    background: rgba(22, 27, 34, 0.95);
+    border: 1px solid rgba(48, 54, 61, 0.9);
+    border-bottom-width: 2px;
+    border-radius: 5px;
+}
+
+.search-meta .feature-chips {
+    margin: 0;
+}
+
+/* Stat cards with icons */
+.stats-grid {
+    gap: 12px;
+}
+
+.stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 14px 10px;
+    border-radius: 14px;
+    background: rgba(13, 17, 23, 0.65);
+    border: 1px solid rgba(48, 54, 61, 0.75);
+    transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.stat:hover {
+    transform: translateY(-2px);
+    border-color: rgba(88, 166, 255, 0.45);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
+}
+
+.stat-value {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 5px;
+    font-size: 1.3rem;
+    font-weight: 800;
+    color: #f0f6fc;
+    font-variant-numeric: tabular-nums;
+}
+
+.stat-icon {
+    font-size: 0.95rem;
+}
+
+.stat-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    color: #8b949e;
+}
+
+/* Avatar glow ring */
+.avatar {
+    box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.35), 0 10px 28px rgba(0, 0, 0, 0.45);
+}
+
+/* Detail rows — accent marker for structure */
+.detail-label::before {
+    content: "•";
+    color: #58a6ff;
+    margin-right: 8px;
+}
+
+/* Section rhythm */
+.section-title {
+    font-size: 1.12rem;
+    font-weight: 700;
+    margin: 26px 0 14px;
+}
+
+/* Empty states — clear dashed panels */
+.empty-state {
+    padding: 26px 18px;
+    text-align: center;
+    color: #8b949e;
+    border: 1px dashed rgba(48, 54, 61, 0.85);
+    border-radius: 12px;
+    background: rgba(13, 17, 23, 0.4);
+}
+
+/* Keyboard focus rings for accessibility */
+button:focus-visible,
+input:focus-visible,
+a:focus-visible {
+    outline: 2px solid rgba(88, 166, 255, 0.7);
+    outline-offset: 2px;
+}
+
+/* Smooth scrolling */
+html {
+    scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    html {
+        scroll-behavior: auto;
+    }
+}

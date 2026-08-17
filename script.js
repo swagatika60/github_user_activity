@@ -17,6 +17,19 @@ document.addEventListener("DOMContentLoaded", () => {
     clearHistoryBtn.addEventListener("click", clearHistory);
     document.getElementById("output").addEventListener("click", handleOutputClick);
 
+    const searchClear = document.getElementById("search-clear");
+    input.addEventListener("input", () => {
+        searchClear.hidden = !input.value;
+    });
+    searchClear.addEventListener("click", () => {
+        input.value = "";
+        searchClear.hidden = true;
+        input.focus();
+    });
+    document.getElementById("header-compare").addEventListener("click", () => {
+        openCompare({ data: { profile: { login: "" } } });
+    });
+
     initInteractiveEffects();
     setupAuthUI();
     initApp().then(handleUrlParams);
@@ -377,16 +390,34 @@ function truncateText(text, maxLength = 280) {
     return `${cleaned.slice(0, maxLength).trim()}…`;
 }
 
+const STAT_ICONS = {
+    Repos: "🗂",
+    Followers: "👥",
+    Following: "➕",
+    Gists: "💬",
+    Stars: "⭐",
+    Forks: "⑂",
+    Issues: "🐞",
+    Watchers: "👀",
+    Comments: "💬",
+    Assignees: "🧑",
+    "+Lines": "➕",
+    "−Lines": "➖",
+    Files: "📄",
+    Commits: "📝",
+};
+
 function renderStat(label, value) {
     const numeric = typeof value === "number" && Number.isFinite(value);
-    return `<div class="stat"><span class="stat-value" ${numeric ? `data-count="${value}"` : ""}>${value}</span><span class="stat-label">${label}</span></div>`;
+    const icon = STAT_ICONS[label] ? `<span class="stat-icon" aria-hidden="true">${STAT_ICONS[label]}</span>` : "";
+    return `<div class="stat"><span class="stat-value">${icon}<span class="stat-num" ${numeric ? `data-count="${value}"` : ""}>${value}</span></span><span class="stat-label">${label}</span></div>`;
 }
 
 // Animate numeric .stat-value elements up to their target (eased count-up).
 function animateStats(container) {
     if (!container) return;
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
-    container.querySelectorAll(".stat-value[data-count]").forEach((el) => {
+    container.querySelectorAll(".stat-num[data-count]").forEach((el) => {
         const target = Number(el.dataset.count);
         if (!Number.isFinite(target)) return;
         const duration = 700;

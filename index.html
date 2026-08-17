@@ -19,6 +19,10 @@
                 </div>
             </div>
             <div class="header-actions">
+                <button type="button" class="header-action-btn" id="header-compare" title="Compare two GitHub users">
+                    <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1a1.75 1.75 0 1 1 0 3.5A1.75 1.75 0 0 1 8 1ZM4.75 6.5h4.5a.75.75 0 0 1 0 1.5h-3v5.25a.75.75 0 0 1-1.5 0V8h-.75a.75.75 0 0 1 0-1.5h.75Z"/></svg>
+                    Compare
+                </button>
                 <div class="status-pill" id="api-status" title="Backend connection status">
                     <span class="status-dot"></span>
                     <span class="status-text">Connecting...</span>
@@ -68,15 +72,20 @@
             <section class="search-section">
                 <label for="username" class="search-label">Search GitHub</label>
                 <div class="search-box">
+                    <svg class="search-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/></svg>
                     <input type="text" id="username" placeholder="Username or paste any GitHub link..." autocomplete="off">
+                    <button type="button" class="search-clear" id="search-clear" aria-label="Clear search" hidden>&times;</button>
                     <button type="button" id="search-btn">Search</button>
                 </div>
-                <div class="feature-chips">
-                    <span class="chip">Profiles</span>
-                    <span class="chip">Repositories</span>
-                    <span class="chip">Issues</span>
-                    <span class="chip">Pull Requests</span>
-                    <span class="chip">Commits</span>
+                <div class="search-meta">
+                    <span class="search-hint">Press <kbd>Enter</kbd> to search · paste any GitHub link</span>
+                    <div class="feature-chips">
+                        <span class="chip">Profiles</span>
+                        <span class="chip">Repositories</span>
+                        <span class="chip">Issues</span>
+                        <span class="chip">Pull Requests</span>
+                        <span class="chip">Commits</span>
+                    </div>
                 </div>
             </section>
 
