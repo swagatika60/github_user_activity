@@ -2,6 +2,7 @@
 
 A full-stack web application to explore GitHub profiles, repositories, issues, pull requests, commits, and user activity — with user accounts, persistent search history, and deploy-ready backend.
 
+![CI](https://img.shields.io/github/actions/workflow/status/swagatika60/github_user_activity/ci.yml?style=for-the-badge&label=CI&color=2ea043)
 ![GitHub last commit](https://img.shields.io/github/last-commit/swas-g/Github-User-Activity?style=for-the-badge&color=2ea043)
 ![GitHub license](https://img.shields.io/github/license/swas-g/Github-User-Activity?style=for-the-badge&color=58a6ff)
 ![Node.js](https://img.shields.io/badge/node-%3E%3D18-339933?style=for-the-badge&logo=node.js&logoColor=white)
@@ -26,6 +27,8 @@ A full-stack web application to explore GitHub profiles, repositories, issues, p
 
 ### User accounts
 - 👤 **Register & sign in** — email/password authentication with JWT sessions
+- 🔑 **GitHub OAuth sign-in** — secure "Continue with GitHub" login (PKCE + state) for every GitHub user
+- 🧑‍💻 **Your GitHub account** — after OAuth login the app fetches the user's GitHub profile, repositories, priority overview, and a 14-day activity graph (commits, PRs, issues, reviews, branches)
 - 💾 **Persistent history** — searches saved per user in the database (up to 50 entries)
 - 🔐 **Secure passwords** — bcrypt hashing; tokens expire after 7 days
 
@@ -92,6 +95,9 @@ DATABASE_URL=
 |----------|----------|-------------|
 | `PORT` | No | Server port (default `3000`) |
 | `GITHUB_TOKEN` | No | GitHub PAT for higher API rate limits |
+| `GITHUB_CLIENT_ID` | No | GitHub OAuth App client ID (enables GitHub sign-in) |
+| `GITHUB_CLIENT_SECRET` | No | GitHub OAuth App client secret |
+| `PUBLIC_BASE_URL` | No | Public URL of your app; used to build the OAuth callback URL |
 | `JWT_SECRET` | Yes (production) | Secret for signing auth tokens |
 | `DATABASE_URL` | No | PostgreSQL connection string; omit for local SQLite |
 
@@ -115,6 +121,39 @@ npm run dev
 
 Local SQLite data is stored in `data/app.db` (gitignored).
 
+### Running tests
+
+The repo ships with automated tests for the GitHub OAuth flow (token encryption, user upsert, PKCE redirect, callback session issuance, CSRF state rejection), the URL parser, and the GitHub API lookup functions (caching, headers, error handling) using Node's built-in test runner:
+
+```bash
+npm test
+```
+
+Tests use an in-memory SQLite database, so they never touch your local data. Requires Node 18.8+.
+
+### GitHub OAuth sign-in (optional)
+
+1. Go to [github.com/settings/developers](https://github.com/settings/developers) → **New OAuth App**
+2. Set **Homepage URL** to your app URL (`http://localhost:3000` locally)
+3. Set **Authorization callback URL** to `http://localhost:3000/api/auth/github/callback` (use your public URL in production)
+4. Add the app's **Client ID** and **Client secret** to `.env`:
+
+```env
+GITHUB_CLIENT_ID=your_client_id
+GITHUB_CLIENT_SECRET=your_client_secret
+# Production only: the public URL of the deployed app
+PUBLIC_BASE_URL=https://your-app.onrender.com
+```
+
+5. Restart the server — the auth modal now shows **Continue with GitHub**.
+
+> **Troubleshooting sign-in with GitHub:**
+> - The **Authorization callback URL must match exactly** what the app sends. If it doesn't, GitHub shows a `redirect_uri_mismatch` error. Locally this is `http://localhost:3000/api/auth/github/callback`; in production it is `<your-public-url>/api/auth/github/callback` — or set `GITHUB_REDIRECT_URI` (or `PUBLIC_BASE_URL`) to pin the exact URL the app uses.
+> - Both `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` are required. If either is missing, the button shows "GitHub sign-in is not configured" instead of signing in.
+> - OAuth Apps only allow **one** callback URL (no wildcards), so use the same URL in GitHub settings and in the environment.
+
+After signing in, the app fetches the user's GitHub profile, repositories, a priority overview (red/yellow/green with reasons), and a 14-day activity graph and shows them under **Your GitHub account**. The OAuth access token is encrypted (AES-256-GCM) before being stored in the database and is never sent to the browser.
+
 ---
 
 ## 🔌 API Endpoints
@@ -125,7 +164,10 @@ Local SQLite data is stored in `data/app.db` (gitignored).
 | `GET` | `/api/search?q={input}` | Optional | Search by username or GitHub URL |
 | `POST` | `/api/auth/register` | No | Create account `{ email, name, password }` |
 | `POST` | `/api/auth/login` | No | Sign in `{ email, password }` |
+| `GET` | `/api/auth/github` | No | Start the GitHub OAuth flow (redirects to GitHub) |
+| `GET` | `/api/auth/github/callback` | No | GitHub OAuth callback — exchanges code, signs the user in |
 | `GET` | `/api/auth/me` | Yes | Current user profile |
+| `GET` | `/api/account` | Yes | Authenticated user's GitHub profile + repositories |
 | `GET` | `/api/history` | Yes | User search history |
 | `DELETE` | `/api/history` | Yes | Clear user search history |
 

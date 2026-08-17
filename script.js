@@ -3,6 +3,7 @@ const AUTH_TOKEN_KEY = "github-viewer-token";
 const MAX_HISTORY = 8;
 
 let currentUser = null;
+let githubOAuthConfigured = false;
 
 document.addEventListener("DOMContentLoaded", () => {
     const input = document.getElementById("username");
@@ -50,6 +51,16 @@ function setupAuthUI() {
     document.getElementById("open-auth").addEventListener("click", () => openAuthModal("login"));
     document.getElementById("close-auth").addEventListener("click", closeAuthModal);
     document.getElementById("auth-backdrop").addEventListener("click", closeAuthModal);
+    document.getElementById("github-oauth-btn").addEventListener("click", () => {
+        if (!githubOAuthConfigured) {
+            const errorEl = document.getElementById("github-oauth-error");
+            errorEl.textContent =
+                "GitHub sign-in is not configured on this server. The admin needs to add GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET.";
+            errorEl.hidden = false;
+            return;
+        }
+        window.location.href = "/api/auth/github";
+    });
 
     document.querySelectorAll(".auth-tab").forEach((tab) => {
         tab.addEventListener("click", () => switchAuthTab(tab.dataset.tab));
@@ -61,6 +72,7 @@ function setupAuthUI() {
 
 function openAuthModal(tab = "login") {
     document.getElementById("auth-modal").hidden = false;
+    document.getElementById("github-oauth-error").hidden = true;
     switchAuthTab(tab);
 }
 
@@ -103,6 +115,7 @@ async function handleLogin(event) {
         currentUser = data.user;
         updateAuthUI();
         closeAuthModal();
+        renderGitHubAccount();
         await renderHistory();
     } catch (error) {
         errorEl.textContent = error.message;
@@ -131,6 +144,7 @@ async function handleRegister(event) {
         currentUser = data.user;
         updateAuthUI();
         closeAuthModal();
+        renderGitHubAccount();
         await renderHistory();
     } catch (error) {
         errorEl.textContent = error.message;
@@ -155,6 +169,7 @@ async function restoreSession() {
     }
 
     updateAuthUI();
+    await renderGitHubAccount();
 }
 
 function logout() {
@@ -162,14 +177,21 @@ function logout() {
     currentUser = null;
     updateAuthUI();
     renderHistory();
+    const githubSection = document.getElementById("github-section");
+    if (githubSection) {
+        githubSection.hidden = true;
+        document.getElementById("github-account-output").innerHTML = "";
+    }
 }
 
 function updateAuthUI() {
     const area = document.getElementById("auth-area");
 
     if (currentUser) {
+        const avatar = currentUser.avatar_url || currentUser.avatarUrl || "";
         area.innerHTML = `
-            <span class="user-greeting">Hi, ${escapeHtml(currentUser.name)}</span>
+            ${avatar ? `<img class="user-avatar" src="${avatar}" alt="${escapeHtml(currentUser.name || "")}">` : ""}
+            <span class="user-greeting">Hi, ${escapeHtml(currentUser.name || currentUser.email)}</span>
             <button type="button" class="text-btn" id="logout-btn">Sign out</button>`;
         document.getElementById("logout-btn").addEventListener("click", logout);
         return;
@@ -188,6 +210,7 @@ async function checkHealth() {
         const response = await fetch("/api/health");
         if (!response.ok) throw new Error("offline");
         const data = await response.json();
+        githubOAuthConfigured = Boolean(data.githubOAuth);
         dot.classList.add("online");
         const dbLabel = data.database === "postgres" ? "PostgreSQL" : "SQLite";
         text.textContent = data.githubToken
@@ -555,6 +578,304 @@ function renderActivity(data) {
         ${renderMetaBanner(data.cached, data.rateLimit)}
         ${renderActivityList(events, `Recent Activity · @${escapeHtml(data.username)}`)}
     `;
+}
+
+const LANGUAGE_COLORS = {
+    JavaScript: "#f1e05a",
+    TypeScript: "#3178c6",
+    Python: "#3572A5",
+    Go: "#00ADD8",
+    Rust: "#dea584",
+    Java: "#b07219",
+    "C++": "#f34b7d",
+    C: "#555555",
+    "C#": "#178600",
+    HTML: "#e34c26",
+    CSS: "#563d7c",
+    Shell: "#89e051",
+    Ruby: "#701516",
+    PHP: "#4F5D95",
+    Swift: "#F05138",
+    Kotlin: "#A97BFF",
+    Dart: "#00B4AB",
+    Dockerfile: "#384d54",
+    SQL: "#e38c00",
+    Vue: "#41b883",
+    Svelte: "#ff3e00",
+    Scala: "#c22d40",
+    "Jupyter Notebook": "#DA5B0B",
+    Lua: "#000080",
+    R: "#198CE7",
+    Zig: "#ec915c",
+    "Objective-C": "#438eff",
+    PowerShell: "#012456",
+};
+
+function renderRepoCard(repo) {
+    const language = repo.language || "";
+    const languageDot = language
+        ? `<span class="repo-lang"><span class="lang-dot" style="background:${LANGUAGE_COLORS[language] || "#8b949e"}"></span>${escapeHtml(language)}</span>`
+        : "";
+
+    return `
+        <a class="repo-card" href="${repo.html_url}" target="_blank" rel="noopener">
+            <div class="repo-card-top">
+                <span class="repo-name">${escapeHtml(repo.name)}</span>
+                ${repo.fork ? '<span class="repo-badge">fork</span>' : ""}
+            </div>
+            <p class="repo-desc">${escapeHtml(truncateText(repo.description, 140))}</p>
+            <div class="repo-card-meta">
+                ${languageDot}
+                ${repo.stargazers_count ? `<span>★ ${repo.stargazers_count}</span>` : ""}
+                ${repo.forks_count ? `<span>⑂ ${repo.forks_count}</span>` : ""}
+                <span>Updated ${timeAgo(repo.updated_at)}</span>
+            </div>
+        </a>`;
+}
+
+function renderPriorityBanner(priority) {
+    const parts = [];
+    if (priority.red) parts.push(`<span class="pri-red">🔴 ${priority.red} urgent</span>`);
+    if (priority.yellow) parts.push(`<span class="pri-yellow">🟡 ${priority.yellow} need attention</span>`);
+    if (priority.green) parts.push(`<span class="pri-green">🟢 ${priority.green} healthy</span>`);
+    const body = parts.length ? parts.join(" · ") : "🟢 All clear";
+    return `<div class="priority-banner priority-${priority.level}">${body}</div>`;
+}
+
+const GITHUB_ICON =
+    '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>';
+
+function openGitHubButton(item) {
+    return `<a class="open-btn" href="${item.html_url}" target="_blank" rel="noopener" aria-label="Open on GitHub">${GITHUB_ICON}<span class="open-btn-text">Open on GitHub</span></a>`;
+}
+
+function renderPriorityItem(item) {
+    const reason = item.reason ? `<span class="priority-reason">${escapeHtml(item.reason)}</span>` : "";
+    return `
+        <div class="priority-item priority-${item.priority}">
+            <span class="priority-dot"></span>
+            <a class="priority-body" href="${item.html_url}" target="_blank" rel="noopener" title="${escapeHtml(item.reason || item.priority)}">
+                <span class="priority-title">${escapeHtml(item.title)}</span>
+                ${reason}
+            </a>
+            <span class="priority-meta">${escapeHtml(item.repository)}#${item.number} · ${timeAgo(item.updated_at)}</span>
+            ${openGitHubButton(item)}
+        </div>`;
+}
+
+function renderPriorityList(items, title, emptyText) {
+    const rows = items.length
+        ? items.map(renderPriorityItem).join("")
+        : `<div class="empty-state">${emptyText}</div>`;
+    return `
+        <h3 class="section-title priority-section-title">${title} <span class="count-badge">${items.length}</span></h3>
+        <div class="priority-list">${rows}</div>`;
+}
+
+function renderTopAction(item, index) {
+    return `
+        <div class="priority-item priority-${item.priority}">
+            <span class="action-rank">${index + 1}</span>
+            <a class="priority-body" href="${item.html_url}" target="_blank" rel="noopener" title="${escapeHtml(item.reason || item.priority)}">
+                <span class="priority-title"><span class="type-badge">${escapeHtml(item.type)}</span>${escapeHtml(item.title)}</span>
+                <span class="priority-reason">${escapeHtml(item.reason)}</span>
+            </a>
+            <span class="priority-meta">${escapeHtml(item.repository)}#${item.number} · ${timeAgo(item.updated_at)}</span>
+            ${openGitHubButton(item)}
+        </div>`;
+}
+
+function renderTopActions(actions) {
+    return `
+        <h3 class="section-title priority-section-title">What should I do first? <span class="count-badge">${actions.length}</span></h3>
+        <div class="priority-list">${actions.map(renderTopAction).join("")}</div>`;
+}
+
+const ACTIVITY_CATEGORIES = ["commits", "prs", "issues", "reviews", "branches"];
+const ACTIVITY_COLORS = {
+    commits: "#58a6ff",
+    prs: "#2ea043",
+    issues: "#d29922",
+    reviews: "#bc8cff",
+    branches: "#f0883e",
+};
+const ACTIVITY_LABELS = {
+    commits: "Commits",
+    prs: "Pull requests",
+    issues: "Issues",
+    reviews: "Reviews",
+    branches: "Branches",
+};
+
+function activityDayLabel(date) {
+    return new Date(`${date}T00:00:00Z`).toLocaleDateString(undefined, { weekday: "short" });
+}
+
+function renderActivityGraph(graph) {
+    const chartHeight = 120;
+    const maxDayTotal = Math.max(
+        1,
+        ...graph.byDay.map((day) => ACTIVITY_CATEGORIES.reduce((sum, c) => sum + day[c], 0))
+    );
+
+    const columns = graph.byDay
+        .map((day, index) => {
+            const segments = ACTIVITY_CATEGORIES.filter((c) => day[c] > 0)
+                .map(
+                    (c) =>
+                        `<div class="bar-segment bar-${c}" style="height:${Math.round((day[c] / maxDayTotal) * chartHeight)}px" title="${ACTIVITY_LABELS[c]}: ${day[c]}"></div>`
+                )
+                .join("");
+            return `
+                <div class="bar-column" title="${day.date}">
+                    <div class="bar-stack" style="animation-delay:${index * 35}ms">${segments || '<div class="bar-empty"></div>'}</div>
+                    <span class="bar-label">${activityDayLabel(day.date)}</span>
+                </div>`;
+        })
+        .join("");
+
+    const chips = ACTIVITY_CATEGORIES.map(
+        (c) =>
+            `<span class="stat-chip"><span class="lang-dot" style="background:${ACTIVITY_COLORS[c]}"></span>${graph.totals[c]} ${escapeHtml(ACTIVITY_LABELS[c].toLowerCase())}</span>`
+    ).join("");
+
+    const legend = ACTIVITY_CATEGORIES.map(
+        (c) => `<span><span class="lang-dot" style="background:${ACTIVITY_COLORS[c]}"></span>${ACTIVITY_LABELS[c]}</span>`
+    ).join("");
+
+    const repoRows = graph.byRepo
+        .map((repo) => {
+            const counts = ACTIVITY_CATEGORIES.filter((c) => repo[c] > 0)
+                .map((c) => `${repo[c]} ${escapeHtml(ACTIVITY_LABELS[c].toLowerCase())}`)
+                .join(" · ");
+            return `
+                <div class="repo-activity-row">
+                    <span class="repo-activity-name">${escapeHtml(repo.name)}</span>
+                    <span class="repo-activity-counts">${counts || "—"}</span>
+                </div>`;
+        })
+        .join("");
+
+    return `
+        <h3 class="section-title priority-section-title">GitHub activity <span class="count-badge">last 14 days</span></h3>
+        <div class="activity-chips">${chips}</div>
+        <div class="bar-chart">${columns}</div>
+        <div class="bar-legend">${legend}</div>
+        ${graph.byRepo.length ? `<div class="repo-activity-list">${repoRows}</div>` : ""}`;
+}
+
+const MAX_REPO_CARDS = 12;
+
+function profileCardHtml(profile) {
+    return `
+        <div class="detail-card hero-card">
+            <div class="profile-header">
+                <img src="${profile.avatar_url}" alt="${escapeHtml(profile.login)}" class="avatar">
+                <div class="profile-info">
+                    <h2>${escapeHtml(profile.name || profile.login)}</h2>
+                    <a href="${profile.html_url}" target="_blank" rel="noopener" class="repo-link">@${escapeHtml(profile.login)}</a>
+                    <p class="detail-description">${escapeHtml(truncateText(profile.bio, 300))}</p>
+                </div>
+            </div>
+            <div class="stats-grid">
+                ${renderStat("Repos", profile.public_repos)}
+                ${renderStat("Followers", profile.followers)}
+                ${renderStat("Following", profile.following)}
+            </div>
+            ${renderDetailRow("Company", escapeHtml(profile.company || "—"))}
+            ${renderDetailRow("Location", escapeHtml(profile.location || "—"))}
+            ${renderDetailRow("Joined", formatDate(profile.created_at))}
+        </div>`;
+}
+
+function renderReposSection(repos) {
+    const shown = repos.slice(0, MAX_REPO_CARDS);
+    const extra = repos.length - shown.length;
+    const cards = shown.length
+        ? shown.map(renderRepoCard).join("")
+        : '<div class="empty-state">No repositories found.</div>';
+    return `
+        <h2 class="section-title">Repositories</h2>
+        <div class="repo-grid">${cards}</div>
+        ${extra > 0 ? `<p class="detail-muted">+ ${extra} more repositories</p>` : ""}`;
+}
+
+function renderAccountSkeleton() {
+    return `
+        <div class="skeleton skeleton-banner"></div>
+        <div class="skeleton-card">
+            <div class="skeleton-row">
+                <div class="skeleton skeleton-avatar"></div>
+                <div class="skeleton-lines">
+                    <div class="skeleton skeleton-line w60"></div>
+                    <div class="skeleton skeleton-line w40"></div>
+                </div>
+            </div>
+            <div class="skeleton-grid">
+                <div class="skeleton skeleton-stat"></div>
+                <div class="skeleton skeleton-stat"></div>
+                <div class="skeleton skeleton-stat"></div>
+            </div>
+        </div>
+        <div class="skeleton-cards">
+            <div class="skeleton skeleton-card-sm"></div>
+            <div class="skeleton skeleton-card-sm"></div>
+            <div class="skeleton skeleton-card-sm"></div>
+        </div>`;
+}
+
+function githubAccountSections(data) {
+    const profile = data.profile;
+    const activityEvents = data.recentActivity.map(formatActivityMessage);
+
+    return [
+        renderPriorityBanner(data.priority),
+        data.topActions?.length ? renderTopActions(data.topActions) : "",
+        profileCardHtml(profile),
+        renderReposSection(data.repos),
+        renderPriorityList(data.openPRs, "Open pull requests", "No open pull requests."),
+        renderPriorityList(data.reviewRequests, "PR Review", "No PRs waiting for your review."),
+        renderPriorityList(data.assignedIssues, "Assigned issues", "No assigned issues."),
+        data.activityGraph ? renderActivityGraph(data.activityGraph) : "",
+        renderActivityList(activityEvents, "Recent activity"),
+    ].filter(Boolean);
+}
+
+async function renderGitHubAccount() {
+    const section = document.getElementById("github-section");
+    const output = document.getElementById("github-account-output");
+
+    if (!currentUser || !currentUser.github_login) {
+        section.hidden = true;
+        output.innerHTML = "";
+        return;
+    }
+
+    section.hidden = false;
+    output.innerHTML = renderAccountSkeleton();
+
+    try {
+        const response = await apiFetch("/api/account");
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Failed to load your GitHub account");
+
+        // Render sections progressively so the priority summary and top actions
+        // appear first, then the rest fills in without blocking the UI.
+        const parts = githubAccountSections(data);
+        output.innerHTML = "";
+        let index = 0;
+        const renderNext = () => {
+            if (index >= parts.length) return;
+            output.insertAdjacentHTML("beforeend", parts[index]);
+            index += 1;
+            requestAnimationFrame(renderNext);
+        };
+        requestAnimationFrame(renderNext);
+
+        updateRateLimitFooter(data.rateLimit);
+    } catch (error) {
+        output.innerHTML = `<div class="error-message">${escapeHtml(error.message)}</div>`;
+    }
 }
 
 function showLoading() {
