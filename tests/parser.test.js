@@ -71,6 +71,56 @@ test("parses commit URLs", () => {
     });
 });
 
+test("parses bare owner/repo input as a repository", () => {
+    assert.deepStrictEqual(parseGitHubInput("facebook/react"), {
+        type: "repo",
+        owner: "facebook",
+        repo: "react",
+    });
+    assert.deepStrictEqual(parseGitHubInput("@facebook/react"), {
+        type: "repo",
+        owner: "facebook",
+        repo: "react",
+    });
+    assert.deepStrictEqual(parseGitHubInput("facebook/react/"), {
+        type: "repo",
+        owner: "facebook",
+        repo: "react",
+    });
+    assert.deepStrictEqual(parseGitHubInput("microsoft/vscode"), {
+        type: "repo",
+        owner: "microsoft",
+        repo: "vscode",
+    });
+});
+
+test("parses bare owner/repo deep paths", () => {
+    assert.deepStrictEqual(parseGitHubInput("facebook/react/issues/42"), {
+        type: "issue",
+        owner: "facebook",
+        repo: "react",
+        number: "42",
+    });
+    assert.deepStrictEqual(parseGitHubInput("facebook/react/pull/99"), {
+        type: "pull",
+        owner: "facebook",
+        repo: "react",
+        number: "99",
+    });
+    assert.deepStrictEqual(parseGitHubInput("facebook/react/commit/abc123"), {
+        type: "commit",
+        owner: "facebook",
+        repo: "react",
+        sha: "abc123",
+    });
+});
+
+test("rejects invalid bare owner/repo shapes", () => {
+    assert.deepStrictEqual(parseGitHubInput("/"), { type: "username", username: "/" });
+    assert.deepStrictEqual(parseGitHubInput("foo//bar"), { type: "repo", owner: "foo", repo: "bar" });
+    assert.deepStrictEqual(parseGitHubInput("has space/name"), { type: "username", username: "has space/name" });
+});
+
 test("falls back to a repo for unmatched deep links", () => {
     assert.deepStrictEqual(parseGitHubInput("https://github.com/facebook/react/tree/main"), {
         type: "repo",
