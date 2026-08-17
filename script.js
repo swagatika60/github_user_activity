@@ -71,7 +71,7 @@ function initInteractiveEffects() {
 
     // Click ripple on buttons and chips.
     document.addEventListener("click", (event) => {
-        const btn = event.target.closest(".tool-btn, .submit-btn, .auth-btn, .filter-chip");
+        const btn = event.target.closest(".tool-btn, .submit-btn, .auth-btn, .filter-chip, .result-tab");
         if (!btn || btn.disabled) return;
         const rect = btn.getBoundingClientRect();
         const size = Math.max(rect.width, rect.height) * 2;
@@ -498,9 +498,8 @@ function renderUser(data) {
     const user = data.profile;
     const profileUrl = user.html_url;
 
-    return `
+    const overview = `
         ${renderMetaBanner(data.cached, data.rateLimit)}
-        ${toolbarHtml({ canStar: true, canCompare: true })}
         <div class="detail-card hero-card">
             <div class="profile-header">
                 <img src="${user.avatar_url}" alt="${escapeHtml(user.login)}" class="avatar">
@@ -520,13 +519,46 @@ function renderUser(data) {
             ${renderDetailRow("Location", escapeHtml(user.location || "—"))}
             ${renderDetailRow("Joined", formatDate(user.created_at))}
             ${renderDetailRow("Profile", `<a href="${profileUrl}" target="_blank" rel="noopener" class="repo-link">${profileUrl}</a>`)}
-        </div>
-        ${data.contributions?.length ? renderHeatmap(data.contributions) : ""}
-        ${data.languages?.length ? renderLanguages(data.languages) : ""}
-        ${renderReposSection(data.repos || [])}
-        ${data.activityGraph ? renderActivityGraph(data.activityGraph) : ""}
-        ${renderActivityListWithFilters(data.events || [], "Recent Activity")}
-    `;
+        </div>`;
+
+    const tabs = [
+        { key: "overview", label: "Overview", body: overview },
+        {
+            key: "heatmap",
+            label: "Heatmap",
+            body: data.contributions?.length
+                ? renderHeatmap(data.contributions)
+                : '<div class="empty-state">No contribution data available.</div>',
+        },
+        {
+            key: "languages",
+            label: "Languages",
+            body: data.languages?.length
+                ? renderLanguages(data.languages)
+                : '<div class="empty-state">No language data available.</div>',
+        },
+        { key: "repos", label: "Repositories", body: renderReposSection(data.repos || []) },
+        {
+            key: "activity",
+            label: "Activity",
+            body: `${data.activityGraph ? renderActivityGraph(data.activityGraph) : ""}${renderActivityListWithFilters(data.events || [], "Recent Activity")}`,
+        },
+    ];
+
+    const tabBar = tabs
+        .map((tab, index) => `<button type="button" class="result-tab ${index === 0 ? "active" : ""}" data-tab="${tab.key}">${tab.label}</button>`)
+        .join("");
+    const panels = tabs
+        .map(
+            (tab, index) =>
+                `<div class="tab-panel ${index === 0 ? "active" : ""}" data-panel="${tab.key}">${tab.body}</div>`
+        )
+        .join("");
+
+    return `
+        ${toolbarHtml({ canStar: true, canCompare: true })}
+        <div class="result-tabs">${tabBar}</div>
+        <div class="result-tab-panels">${panels}</div>`;
 }
 
 function renderRepo(data) {
@@ -1340,6 +1372,16 @@ function renderActivityListWithFilters(rawEvents, title, filterKey = "all") {
 }
 
 function handleOutputClick(event) {
+    const tabBtn = event.target.closest("[data-tab]");
+    if (tabBtn) {
+        const tabBar = tabBtn.closest(".result-tabs");
+        const panels = tabBar?.nextElementSibling;
+        if (!panels) return;
+        tabBar.querySelectorAll(".result-tab").forEach((btn) => btn.classList.toggle("active", btn === tabBtn));
+        panels.querySelectorAll(".tab-panel").forEach((panel) => panel.classList.toggle("active", panel.dataset.panel === tabBtn.dataset.tab));
+        return;
+    }
+
     const actionBtn = event.target.closest("[data-action]");
     if (actionBtn) {
         const result = window.__lastResult;

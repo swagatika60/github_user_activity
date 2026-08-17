@@ -2250,6 +2250,7 @@ body::after {
 .submit-btn,
 .auth-btn,
 .filter-chip,
+.result-tab,
 #search-btn {
     position: relative;
     overflow: hidden;
@@ -2278,9 +2279,56 @@ body::after {
 .auth-btn:active,
 #search-btn:active,
 .filter-chip:active,
+.result-tab:active,
 .feature-chips .chip:active,
 .repo-card:active {
     transform: scale(0.97);
+}
+
+/* ---------------------------------------------------------------------------
+   Feature tabs — one block per feature
+   --------------------------------------------------------------------------- */
+
+.result-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 2px 0 18px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid rgba(48, 54, 61, 0.7);
+}
+
+.result-tab {
+    padding: 8px 16px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #8b949e;
+    background: rgba(22, 27, 34, 0.9);
+    border: 1px solid rgba(48, 54, 61, 0.9);
+    border-radius: 999px;
+    cursor: pointer;
+    transition: color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.result-tab:hover {
+    color: #c9d1d9;
+    border-color: rgba(88, 166, 255, 0.5);
+}
+
+.result-tab.active {
+    color: #ffffff;
+    background: linear-gradient(120deg, rgba(88, 166, 255, 0.28), rgba(188, 140, 255, 0.24));
+    border-color: rgba(88, 166, 255, 0.6);
+    box-shadow: 0 4px 14px rgba(88, 166, 255, 0.18);
+}
+
+.tab-panel {
+    display: none;
+}
+
+.tab-panel.active {
+    display: block;
+    animation: fadeInUp 0.35s ease both;
 }
 
 /* Activity items — slide + gradient accent bar on hover */
@@ -2324,6 +2372,10 @@ body::after {
     #search-btn,
     .status-dot.online,
     .ripple {
+        animation: none;
+    }
+
+    .tab-panel.active {
         animation: none;
     }
 }
