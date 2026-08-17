@@ -17,9 +17,74 @@ document.addEventListener("DOMContentLoaded", () => {
     clearHistoryBtn.addEventListener("click", clearHistory);
     document.getElementById("output").addEventListener("click", handleOutputClick);
 
+    initInteractiveEffects();
     setupAuthUI();
     initApp().then(handleUrlParams);
 });
+
+// Mouse-following spotlight, 3D card tilt and click ripples. Uses event
+// delegation so dynamically rendered cards/buttons get the effects too.
+function initInteractiveEffects() {
+    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+
+    // Cursor glow (fine pointers only, skipped for reduced motion).
+    if (!reduceMotion && window.matchMedia?.("(pointer: fine)").matches) {
+        const glow = document.createElement("div");
+        glow.id = "cursor-glow";
+        glow.setAttribute("aria-hidden", "true");
+        document.body.appendChild(glow);
+
+        let raf = 0;
+        window.addEventListener("mousemove", (event) => {
+            if (raf) return;
+            raf = requestAnimationFrame(() => {
+                raf = 0;
+                glow.style.opacity = "1";
+                glow.style.left = `${event.clientX}px`;
+                glow.style.top = `${event.clientY}px`;
+            });
+        });
+        document.addEventListener("mouseleave", () => {
+            glow.style.opacity = "0";
+        });
+    }
+
+    // Card spotlight + subtle 3D tilt on repo cards.
+    document.addEventListener("mousemove", (event) => {
+        const card = event.target.closest(".detail-card, .repo-card");
+        if (!card) return;
+        const rect = card.getBoundingClientRect();
+        const x = event.clientX - rect.left;
+        const y = event.clientY - rect.top;
+        card.style.setProperty("--mx", `${x}px`);
+        card.style.setProperty("--my", `${y}px`);
+        if (!reduceMotion && card.classList.contains("repo-card")) {
+            const px = x / rect.width - 0.5;
+            const py = y / rect.height - 0.5;
+            card.style.transform = `perspective(600px) rotateY(${(px * 5).toFixed(2)}deg) rotateX(${(-py * 5).toFixed(2)}deg) translateY(-2px)`;
+        }
+    });
+    document.addEventListener("mouseout", (event) => {
+        const card = event.target.closest(".repo-card");
+        if (card) card.style.transform = "";
+    });
+
+    // Click ripple on buttons and chips.
+    document.addEventListener("click", (event) => {
+        const btn = event.target.closest(".tool-btn, .submit-btn, .auth-btn, .filter-chip");
+        if (!btn || btn.disabled) return;
+        const rect = btn.getBoundingClientRect();
+        const size = Math.max(rect.width, rect.height) * 2;
+        const span = document.createElement("span");
+        span.className = "ripple";
+        span.style.width = `${size}px`;
+        span.style.height = `${size}px`;
+        span.style.left = `${event.clientX - rect.left - size / 2}px`;
+        span.style.top = `${event.clientY - rect.top - size / 2}px`;
+        btn.appendChild(span);
+        setTimeout(() => span.remove(), 650);
+    });
+}
 
 async function initApp() {
     await checkHealth();
