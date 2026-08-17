@@ -19,6 +19,10 @@
                 </div>
             </div>
             <div class="header-actions">
+                <button type="button" class="back-btn" id="back-home" title="Back to the main page" hidden>
+                    <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M7.78 12.53a.75.75 0 0 1-1.06 0L2.47 8.28a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 1.06L4.81 7h7.44a.75.75 0 0 1 0 1.5H4.81l2.97 2.97a.75.75 0 0 1 0 1.06Z"/></svg>
+                    Back
+                </button>
                 <button type="button" class="header-action-btn" id="header-compare" title="Compare two GitHub users">
                     <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1a1.75 1.75 0 1 1 0 3.5A1.75 1.75 0 0 1 8 1ZM4.75 6.5h4.5a.75.75 0 0 1 0 1.5h-3v5.25a.75.75 0 0 1-1.5 0V8h-.75a.75.75 0 0 1 0-1.5h.75Z"/></svg>
                     Compare
@@ -69,22 +73,31 @@
         </div>
 
         <main class="main-card">
-            <section class="search-section">
-                <label for="username" class="search-label">Search GitHub</label>
+            <section class="hero-section">
+                <h1 class="hero-title">Explore <span class="hero-gradient">any GitHub universe</span></h1>
+                <p class="hero-subtitle">Profiles, repositories, issues, pull requests &amp; commits — with contribution heatmaps, language charts, activity graphs and user comparisons.</p>
+
                 <div class="search-box">
                     <svg class="search-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/></svg>
                     <input type="text" id="username" placeholder="Username, owner/repo, or paste any GitHub link..." autocomplete="off">
                     <button type="button" class="search-clear" id="search-clear" aria-label="Clear search" hidden>&times;</button>
                     <button type="button" id="search-btn">Search</button>
                 </div>
+
                 <div class="search-meta">
-                    <span class="search-hint">Press <kbd>Enter</kbd> to search · try <code>torvalds</code>, <code>facebook/react</code>, or paste any GitHub link</span>
+                    <div class="try-chips">
+                        <span class="try-label">Try:</span>
+                        <button type="button" class="try-chip" data-query="torvalds">@torvalds</button>
+                        <button type="button" class="try-chip" data-query="gaearon">@gaearon</button>
+                        <button type="button" class="try-chip" data-query="facebook/react">facebook/react</button>
+                        <button type="button" class="try-chip" data-query="octocat">@octocat</button>
+                    </div>
                     <div class="feature-chips">
-                        <span class="chip">Profiles</span>
-                        <span class="chip">Repositories</span>
-                        <span class="chip">Issues</span>
-                        <span class="chip">Pull Requests</span>
-                        <span class="chip">Commits</span>
+                        <span class="chip">👤 Profiles</span>
+                        <span class="chip">📦 Repositories</span>
+                        <span class="chip">🐛 Issues</span>
+                        <span class="chip">🔀 Pull Requests</span>
+                        <span class="chip">✅ Commits</span>
                     </div>
                 </div>
             </section>
@@ -97,12 +110,39 @@
                 <div class="history-list" id="history-list"></div>
             </section>
 
-
-            <section id="output" class="output-section"></section>
+            <section id="output" class="output-section">
+                <div class="welcome-panel">
+                    <div class="welcome-head">
+                        <h2>What can you do?</h2>
+                        <p>Everything loads right here — no signup needed for public GitHub data.</p>
+                    </div>
+                    <div class="welcome-grid">
+                        <div class="welcome-card">
+                            <div class="welcome-icon" style="--icon-grad: linear-gradient(135deg, #58a6ff, #1f6feb)">👤</div>
+                            <h3>Profile deep-dive</h3>
+                            <p>Bio &amp; stats, a full-year contribution heatmap, top languages, a 90-day activity chart and a draggable activity map.</p>
+                            <button type="button" class="welcome-cta" data-query="torvalds">Search @torvalds →</button>
+                        </div>
+                        <div class="welcome-card">
+                            <div class="welcome-icon" style="--icon-grad: linear-gradient(135deg, #3fb950, #238636)">📦</div>
+                            <h3>Repositories &amp; links</h3>
+                            <p>Type <code>owner/repo</code> or paste any GitHub link for stars, topics, license and a file tree.</p>
+                            <button type="button" class="welcome-cta" data-query="facebook/react">Search facebook/react →</button>
+                        </div>
+                        <div class="welcome-card">
+                            <div class="welcome-icon" style="--icon-grad: linear-gradient(135deg, #bc8cff, #8957e5)">⚖️</div>
+                            <h3>Compare users</h3>
+                            <p>Side-by-side stats with winner highlighting, top languages and a shareable link.</p>
+                            <button type="button" class="welcome-cta" data-open-compare>Compare now →</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
         </main>
 
         <footer class="app-footer">
-            <span>Powered by GitHub REST API</span>
+            <span class="footer-brand">🌌 GitHub Activity Viewer</span>
+            <span>Powered by <a href="https://docs.github.com/en/rest" target="_blank" rel="noopener">GitHub REST API</a></span>
             <span id="rate-limit-info"></span>
         </footer>
     </div>

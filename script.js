@@ -4,10 +4,18 @@ const MAX_HISTORY = 8;
 
 let currentUser = null;
 
+let welcomeHtml = null;
+
 document.addEventListener("DOMContentLoaded", () => {
     const input = document.getElementById("username");
     const searchBtn = document.getElementById("search-btn");
     const clearHistoryBtn = document.getElementById("clear-history");
+
+    /* remember the landing-page welcome markup so "Back" can restore it */
+    welcomeHtml = document.getElementById("output").innerHTML;
+
+    document.getElementById("back-home").addEventListener("click", goHome);
+    document.querySelector(".brand").addEventListener("click", goHome);
 
     searchBtn.addEventListener("click", getActivity);
     input.addEventListener("keypress", (event) => {
@@ -28,6 +36,21 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     document.getElementById("header-compare").addEventListener("click", () => {
         openCompare({ data: { profile: { login: "" } } });
+    });
+
+    /* main-page "try" chips and welcome CTAs */
+    document.addEventListener("click", (event) => {
+        const compareBtn = event.target.closest("[data-open-compare]");
+        if (compareBtn) {
+            openCompare({ data: { profile: { login: "" } } });
+            return;
+        }
+        const queryBtn = event.target.closest("[data-query]");
+        if (queryBtn) {
+            const input = document.getElementById("username");
+            if (input) input.value = queryBtn.dataset.query;
+            getActivity();
+        }
     });
 
     initInteractiveEffects();
@@ -525,6 +548,198 @@ function renderActivityList(events, title) {
     return `<h2 class="section-title">${title}</h2><div class="activity-list">${items}</div>`;
 }
 
+/* ------------------------------------------------------------------ *
+ * Issues & PRs triage — open items grouped by how much attention
+ * they need: red (7+ days) · yellow (2–7 days) · green (< 2 days)   *
+ * ------------------------------------------------------------------ */
+function buildTriageItems(events) {
+    const prMap = new Map();
+    const issueMap = new Map();
+
+    const store = (map, key, item) => {
+        const existing = map.get(key);
+        // prefer the richer (full-payload) version of an item
+        if (!existing || (!existing.full && item.full)) map.set(key, item);
+    };
+
+    for (const e of events || []) {
+        const repo = e.repo?.name;
+        const action = e.payload?.action || "";
+        const eventDate = e.created_at;
+        const pr = e.payload?.pull_request;
+        const issue = e.payload?.issue;
+
+        /* Issues payloads carry the full object — including PRs, which GitHub
+           exposes here with title/state/dates even though PR events truncate it */
+        if (issue?.number && repo) {
+            const isPr = Boolean(issue.pull_request) || String(issue.node_id || "").startsWith("PR_");
+            const map = isPr ? prMap : issueMap;
+            const key = `${repo}#${issue.number}`;
+            store(map, key, {
+                kind: isPr ? "pr" : "issue",
+                number: issue.number,
+                title: issue.title || "",
+                state: issue.state || (action === "closed" ? "closed" : "open"),
+                created_at: issue.created_at || eventDate,
+                repo,
+                url: issue.html_url || (isPr ? `https://github.com/${repo}/pull/${issue.number}` : `https://github.com/${repo}/issues/${issue.number}`),
+                comments: issue.comments || 0,
+                author: issue.user?.login || "",
+                closed_at: issue.closed_at || "",
+                full: true,
+            });
+        }
+
+        /* PR events only carry number + head/base refs — keep them as a
+           fallback when the full object never came through */
+        if (pr?.number && repo && (e.type === "PullRequestEvent" || e.type === "PullRequestReviewEvent")) {
+            const key = `${repo}#${pr.number}`;
+            store(prMap, key, {
+                kind: "pr",
+                number: pr.number,
+                title: "",
+                state: action === "closed" ? "closed" : "open",
+                created_at: eventDate,
+                repo,
+                url: `https://github.com/${repo}/pull/${pr.number}`,
+                headRef: pr.head?.ref || "",
+                baseRef: pr.base?.ref || "",
+                comments: 0,
+                author: "",
+                full: false,
+            });
+        }
+    }
+
+    return { prs: [...prMap.values()], issues: [...issueMap.values()] };
+}
+
+function triagePriority(item) {
+    const daysSince = (iso) => (Date.now() - new Date(iso).getTime()) / 86400000;
+    if (item.state === "open") {
+        const days = daysSince(item.created_at);
+        if (days >= 7) return "attention";
+        if (days >= 2) return "middle";
+        return "recent";
+    }
+    /* closed/merged items count as recent when they happened within 3 days */
+    const closedDays = item.closed_at ? daysSince(item.closed_at) : daysSince(item.created_at);
+    return closedDays <= 3 ? "recent" : null;
+}
+
+function renderTriageItem(item) {
+    const badge =
+        item.kind === "pr"
+            ? '<span class="triage-badge triage-pr">PR</span>'
+            : '<span class="triage-badge triage-issue">Issue</span>';
+    const title = item.title || (item.kind === "pr" ? `Pull request #${item.number}` : `Issue #${item.number}`);
+    const refs =
+        item.headRef && item.baseRef
+            ? `<code>${escapeHtml(item.headRef)}</code> → <code>${escapeHtml(item.baseRef)}</code> · `
+            : "";
+    const author = item.author ? ` · by <b>@${escapeHtml(item.author)}</b>` : "";
+    const comments = item.comments ? ` · <b>${item.comments}</b> comment${item.comments === 1 ? "" : "s"}` : "";
+    return `
+        <a class="triage-item" href="${item.url}" target="_blank" rel="noopener">
+            ${badge}
+            <span class="triage-item-body">
+                <span class="triage-item-title">${escapeHtml(title)}</span>
+                <span class="triage-item-meta">${refs}opened ${timeAgo(item.created_at)}${author}${comments}</span>
+            </span>
+            <span class="triage-item-num">#${item.number}</span>
+        </a>`;
+}
+
+function renderTriage(events) {
+    const { prs, issues } = buildTriageItems(events);
+    const all = [...prs, ...issues];
+
+    if (!all.length) {
+        return `
+            <h3 class="section-title">Issues &amp; Pull requests</h3>
+            <div class="empty-state">No pull requests or issues found in recent activity.</div>`;
+    }
+
+    const blocks = [
+        {
+            key: "attention",
+            label: "Needs attention",
+            color: "#f85149",
+            icon: "🔴",
+            desc: "Open PRs & issues waiting 7+ days — review or reply to these first.",
+        },
+        {
+            key: "middle",
+            label: "Middle",
+            color: "#d29922",
+            icon: "🟡",
+            desc: "Open items from the last week — keep them moving.",
+        },
+        {
+            key: "recent",
+            label: "Recent",
+            color: "#2ea043",
+            icon: "🟢",
+            desc: "Fresh items from the last 48 hours — the newest activity.",
+        },
+    ];
+
+    const closed = all.filter((item) => triagePriority(item) === null);
+
+    return `
+        <h3 class="section-title">Issues &amp; Pull requests <span class="count-badge">${all.length} open</span></h3>
+        <p class="triage-intro">Open PRs &amp; issues from the last 90 days, grouped by how long they've been waiting — each item links to its exact page.</p>
+        ${blocks
+            .map((block) => {
+                const items = all.filter((item) => triagePriority(item) === block.key);
+                const MAX_BLOCK_ITEMS = 10;
+                const shown = items.slice(0, MAX_BLOCK_ITEMS);
+                const more = items.length - shown.length;
+                return `
+                    <div class="triage-block" style="--triage-color:${block.color}">
+                        <div class="triage-block-head">
+                            <span class="triage-block-icon">${block.icon}</span>
+                            <h4>${block.label}</h4>
+                            <span class="count-badge">${items.length}</span>
+                        </div>
+                        <p class="triage-block-desc">${block.desc}</p>
+                        ${shown.length ? `<div class="triage-list">${renderRepoGroups(shown)}${more ? `<p class="triage-more">+ ${more} more…</p>` : ""}</div>` : '<div class="triage-empty">Nothing here — all clear 🎉</div>'}
+                    </div>`;
+            })
+            .join("")}
+        ${closed.length ? `<p class="triage-closed">Also: ${closed.length} PR${closed.length === 1 ? "" : "s"} or issue${closed.length === 1 ? "" : "s"} were closed or merged more than 3 days ago.</p>` : ""}`;
+}
+
+/* group triage items by repository so every repo is clearly named */
+function renderRepoGroups(items) {
+    const map = new Map();
+    for (const item of items) {
+        if (!map.has(item.repo)) map.set(item.repo, []);
+        map.get(item.repo).push(item);
+    }
+    const groups = [...map.entries()]
+        .map(([repo, repoItems]) => ({ repo, repoItems }))
+        .sort((a, b) => b.repoItems.length - a.repoItems.length);
+
+    return groups
+        .map(
+            ({ repo, repoItems }) => `
+                <div class="triage-repo-group">
+                    <a class="triage-repo-name" href="https://github.com/${escapeHtml(repo)}" target="_blank" rel="noopener">
+                        <span class="triage-repo-ic">📦</span>
+                        ${escapeHtml(repo)}
+                        <span class="triage-repo-count">${repoItems.length}</span>
+                    </a>
+                    ${repoItems
+                        .slice()
+                        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+                        .map(renderTriageItem)
+                        .join("")}
+                </div>`
+        )
+        .join("");
+}
+
 function renderUser(data) {
     const user = data.profile;
     const profileUrl = user.html_url;
@@ -554,6 +769,7 @@ function renderUser(data) {
 
     const tabs = [
         { key: "overview", label: "Overview", body: overview },
+        { key: "triage", label: "Issues & PRs", body: renderTriage(data.events || []) },
         {
             key: "heatmap",
             label: "Heatmap",
@@ -572,9 +788,19 @@ function renderUser(data) {
         {
             key: "activity",
             label: "Activity",
-            body: `${data.activityGraph ? renderActivityGraph(data.activityGraph) : ""}${renderActivityListWithFilters(data.events || [], "Recent Activity")}`,
+            body: `${data.activityGraph ? renderActivityGraph(data.activityGraph) : ""}${renderActivityListWithFilters(data.events || [], `Activity history · ${data.eventCount || (data.events || []).length} events`)}`,
         },
-        { key: "graph", label: "Graph", body: '<div class="graph-tab" data-graph-host></div>' },
+        {
+            key: "graph",
+            label: "Graph",
+            body: `<div class="graph-tab">
+                <div class="graph-tab-toolbar">
+                    <span class="graph-tab-title">Activity map</span>
+                    <button type="button" class="graph-expand-btn" data-action="graph-fullscreen">⛶ Fullscreen</button>
+                </div>
+                <div class="graph-host" data-graph-host></div>
+            </div>`,
+        },
     ];
 
     const tabBar = tabs
@@ -862,7 +1088,7 @@ const ACTIVITY_LABELS = {
 };
 
 function activityDayLabel(date) {
-    return new Date(`${date}T00:00:00Z`).toLocaleDateString(undefined, { weekday: "short" });
+    return new Date(`${date}T00:00:00Z`).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 function renderActivityGraph(graph) {
@@ -872,8 +1098,14 @@ function renderActivityGraph(graph) {
         ...graph.byDay.map((day) => ACTIVITY_CATEGORIES.reduce((sum, c) => sum + day[c], 0))
     );
 
+    /* label week starts (plus first/last) instead of every day, so long
+       windows stay readable */
     const columns = graph.byDay
         .map((day, index) => {
+            const isFirst = index === 0;
+            const isLast = index === graph.byDay.length - 1;
+            const isWeekStart = new Date(`${day.date}T00:00:00Z`).getUTCDay() === 0;
+            const showLabel = isFirst || isLast || isWeekStart;
             const segments = ACTIVITY_CATEGORIES.filter((c) => day[c] > 0)
                 .map(
                     (c) =>
@@ -882,8 +1114,8 @@ function renderActivityGraph(graph) {
                 .join("");
             return `
                 <div class="bar-column" title="${day.date}">
-                    <div class="bar-stack" style="animation-delay:${index * 35}ms">${segments || '<div class="bar-empty"></div>'}</div>
-                    <span class="bar-label">${activityDayLabel(day.date)}</span>
+                    <div class="bar-stack" style="animation-delay:${index * 14}ms">${segments || '<div class="bar-empty"></div>'}</div>
+                    <span class="bar-label">${showLabel ? activityDayLabel(day.date) : ""}</span>
                 </div>`;
         })
         .join("");
@@ -911,7 +1143,7 @@ function renderActivityGraph(graph) {
         .join("");
 
     return `
-        <h3 class="section-title priority-section-title">GitHub activity <span class="count-badge">last 14 days</span></h3>
+        <h3 class="section-title priority-section-title">GitHub activity <span class="count-badge">last ${graph.byDay.length} days</span></h3>
         <div class="activity-chips">${chips}</div>
         <div class="bar-chart">${columns}</div>
         <div class="bar-legend">${legend}</div>
@@ -954,7 +1186,36 @@ function renderReposSection(repos) {
         ${extra > 0 ? `<p class="detail-muted">+ ${extra} more repositories</p>` : ""}`;
 }
 
+function showBackButton() {
+    const backBtn = document.getElementById("back-home");
+    if (backBtn) backBtn.hidden = false;
+}
+
+/* return to the landing page: restore the welcome panel and clear the search */
+function goHome() {
+    if (window.__graphLoop) {
+        cancelAnimationFrame(window.__graphLoop);
+        window.__graphLoop = null;
+    }
+    window.__lastResult = null;
+
+    const output = document.getElementById("output");
+    if (welcomeHtml) output.innerHTML = welcomeHtml;
+
+    const input = document.getElementById("username");
+    if (input) input.value = "";
+    const searchClear = document.getElementById("search-clear");
+    if (searchClear) searchClear.hidden = true;
+    const backBtn = document.getElementById("back-home");
+    if (backBtn) backBtn.hidden = true;
+
+    window.history.replaceState({}, "", window.location.pathname);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    input?.focus();
+}
+
 function showLoading() {
+    showBackButton();
     document.getElementById("output").innerHTML = `
         <div class="loading-state">
             <div class="spinner"></div>
@@ -974,6 +1235,8 @@ async function getActivity() {
         showError("Please enter a GitHub username or paste a GitHub link.");
         return;
     }
+
+    showBackButton();
 
     showLoading();
     document.getElementById("search-btn").disabled = true;
@@ -1130,6 +1393,7 @@ function comparePanelHtml(prefillA = "", prefillB = "") {
 }
 
 function openCompare(result) {
+    showBackButton();
     const existing = document.getElementById("compare-panel");
     if (existing) {
         existing.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1326,7 +1590,7 @@ function renderHeatmap(contributions) {
         .join("");
     const legend = HEAT_LEVELS.map((_, i) => `<span class="heat-cell heat-${i}"></span>`).join("");
     return `
-        <h3 class="section-title">Contribution activity <span class="count-badge">last 28 weeks</span></h3>
+        <h3 class="section-title">Contribution activity <span class="count-badge">last ${Math.ceil(contributions.length / 7)} weeks</span></h3>
         <div class="detail-card heat-card">
             <div class="heatmap">${cells}</div>
             <div class="heat-legend"><span class="detail-muted">Less</span>${legend}<span class="detail-muted">More</span></div>
@@ -1355,7 +1619,7 @@ function renderFlowDiagram(data) {
         { label: "Open pull requests", value: data.openPRs?.length || 0, color: "#58a6ff" },
         { label: "Reviews needed", value: data.reviewRequests?.length || 0, color: "#bc8cff" },
         { label: "Assigned issues", value: data.assignedIssues?.length || 0, color: "#d29922" },
-        { label: "Activity (last 14 days)", value: total(data.activityGraph), color: "#2ea043" },
+        { label: "Activity (last 90 days)", value: total(data.activityGraph), color: "#2ea043" },
         { label: "Repositories", value: data.repos?.length || 0, color: "#f0883e" },
     ];
     const body = steps
@@ -1420,7 +1684,7 @@ function handleOutputClick(event) {
             window.__graphLoop = null;
         }
         if (tabBtn.dataset.tab === "graph") {
-            buildActivityGraph(panels.querySelector('[data-panel="graph"]'));
+            buildActivityGraph(panels.querySelector('[data-panel="graph"] [data-graph-host]'));
         }
         return;
     }
@@ -1435,6 +1699,7 @@ function handleOutputClick(event) {
         else if (action === "starred") loadStarred(actionBtn);
         else if (action === "compare") openCompare(result);
         else if (action === "tree") loadRepoTree(actionBtn);
+        else if (action === "graph-fullscreen") openActivityGraph();
         return;
     }
 
@@ -1468,7 +1733,7 @@ async function handleUrlParams() {
  * Activity Graph — structured radial network with physics            *
  *   Center: user · Ring: repos · Outer ring: PRs/issues · draggable *
  * ------------------------------------------------------------------ */
-function buildActivityGraph(host) {
+function buildActivityGraph(host, opts = {}) {
     if (!host) return;
     if (window.__graphLoop) {
         cancelAnimationFrame(window.__graphLoop);
@@ -1481,11 +1746,17 @@ function buildActivityGraph(host) {
         return;
     }
 
+    /* fullscreen mode shows everything; the in-tab graph is a compact overview */
+    const fullscreen = Boolean(opts.fullscreen);
+    const caps = fullscreen
+        ? { repos: 30, pr: 14, issue: 14, push: 12, star: 6, fork: 6 }
+        : { repos: 10, pr: 8, issue: 8, push: 0, star: 0, fork: 0 };
+
     const NS = "http://www.w3.org/2000/svg";
     const profile = data.profile;
     const uid = "ag" + Math.random().toString(36).slice(2, 8);
-    const W = Math.max(host.clientWidth, 320);
-    const H = Math.max(host.clientHeight - 60, 460);
+    const W = fullscreen ? Math.max(window.innerWidth - 48, 640) : Math.max(host.clientWidth, 320);
+    const H = fullscreen ? Math.max(window.innerHeight - 150, 520) : Math.max(host.clientHeight - 60, 460);
     const cx = W / 2;
     const cy = H / 2;
 
@@ -1510,7 +1781,7 @@ function buildActivityGraph(host) {
         avatar: profile.avatar_url,
     });
 
-    const repos = (data.repos || []).slice(0, 10);
+    const repos = (data.repos || []).slice(0, caps.repos);
     repos.forEach((repo) => {
         addNode({
             id: "repo-" + repo.full_name,
@@ -1529,8 +1800,14 @@ function buildActivityGraph(host) {
 
     const seenPR = new Set();
     const seenIssue = new Set();
+    const seenPush = new Set();
+    const seenStar = new Set();
+    const seenFork = new Set();
     let prCount = 0;
     let issueCount = 0;
+    let pushCount = 0;
+    let starCount = 0;
+    let forkCount = 0;
     for (const e of data.events || []) {
         const repoName = e.repo?.name;
         const pr = e.payload?.pull_request;
@@ -1538,7 +1815,7 @@ function buildActivityGraph(host) {
         if (!repoName) continue;
         if ((e.type === "PullRequestEvent" || e.type === "PullRequestReviewEvent") && pr?.number) {
             const key = repoName + "#" + pr.number;
-            if (seenPR.has(key) || prCount >= 8 || !nodeMap.has("repo-" + repoName)) continue;
+            if (seenPR.has(key) || prCount >= caps.pr || !nodeMap.has("repo-" + repoName)) continue;
             seenPR.add(key);
             prCount++;
             addNode({
@@ -1556,7 +1833,7 @@ function buildActivityGraph(host) {
             });
         } else if ((e.type === "IssuesEvent" || e.type === "IssueCommentEvent") && issue?.number) {
             const key = repoName + "#" + issue.number;
-            if (seenIssue.has(key) || issueCount >= 8 || !nodeMap.has("repo-" + repoName)) continue;
+            if (seenIssue.has(key) || issueCount >= caps.issue || !nodeMap.has("repo-" + repoName)) continue;
             seenIssue.add(key);
             issueCount++;
             addNode({
@@ -1572,6 +1849,62 @@ function buildActivityGraph(host) {
                 parent: "repo-" + repoName,
                 title: `Issue #${issue.number} in ${repoName} — ${issue.title || ""}`.slice(0, 80),
             });
+        } else if (e.type === "PushEvent" && caps.push) {
+            const branch = (e.payload?.ref || "").replace("refs/heads/", "") || "HEAD";
+            const short = branch.split("/").pop() || branch;
+            const key = repoName + "#push:" + short;
+            if (seenPush.has(key) || pushCount >= caps.push || !nodeMap.has("repo-" + repoName)) continue;
+            seenPush.add(key);
+            pushCount++;
+            addNode({
+                id: "push-" + key,
+                kind: "push",
+                label: short.slice(0, 10),
+                r: 10,
+                x: cx,
+                y: cy,
+                vx: 0,
+                vy: 0,
+                url: `https://github.com/${repoName}/commits/${encodeURIComponent(branch)}`,
+                parent: "repo-" + repoName,
+                title: `Pushed to ${branch} in ${repoName}`,
+            });
+        } else if (e.type === "WatchEvent" && caps.star) {
+            const key = repoName + "#star";
+            if (seenStar.has(key) || starCount >= caps.star || !nodeMap.has("repo-" + repoName)) continue;
+            seenStar.add(key);
+            starCount++;
+            addNode({
+                id: "star-" + key,
+                kind: "star",
+                label: "Star",
+                r: 10,
+                x: cx,
+                y: cy,
+                vx: 0,
+                vy: 0,
+                url: `https://github.com/${repoName}`,
+                parent: "repo-" + repoName,
+                title: `Starred ${repoName}`,
+            });
+        } else if (e.type === "ForkEvent" && caps.fork) {
+            const key = repoName + "#fork";
+            if (seenFork.has(key) || forkCount >= caps.fork || !nodeMap.has("repo-" + repoName)) continue;
+            seenFork.add(key);
+            forkCount++;
+            addNode({
+                id: "fork-" + key,
+                kind: "fork",
+                label: "Fork",
+                r: 10,
+                x: cx,
+                y: cy,
+                vx: 0,
+                vy: 0,
+                url: `https://github.com/${repoName}`,
+                parent: "repo-" + repoName,
+                title: `Forked ${repoName}`,
+            });
         }
     }
 
@@ -1585,7 +1918,7 @@ function buildActivityGraph(host) {
     /* ---- structured layout: "solar system" ----
        user at center → repos on a clean ring → PRs/issues on an outer ring */
     const repoNodes = nodes.filter((n) => n.kind === "repo");
-    const ringR = Math.min(215, Math.max(130, 120 + repoNodes.length * 12));
+    const ringR = Math.min(fullscreen ? 330 : 215, Math.max(130, 120 + repoNodes.length * (fullscreen ? 10 : 12)));
     repoNodes.forEach((n, i) => {
         const angle = (i / Math.max(repoNodes.length, 1)) * Math.PI * 2 - Math.PI / 2;
         n.angle = angle;
@@ -1611,8 +1944,8 @@ function buildActivityGraph(host) {
             const span = Math.min(0.8, leaves.length * 0.09);
             const angle = (parent.angle ?? 0) + (i - (leaves.length - 1) / 2) * span;
             n.home = {
-                x: Math.max(45, Math.min(W - 45, cx + Math.cos(angle) * (ringR + 96))),
-                y: Math.max(60, Math.min(H - 60, cy + Math.sin(angle) * (ringR + 96))),
+                x: Math.max(45, Math.min(W - 45, cx + Math.cos(angle) * (ringR + (fullscreen ? 118 : 96)))),
+                y: Math.max(60, Math.min(H - 60, cy + Math.sin(angle) * (ringR + (fullscreen ? 118 : 96)))),
             };
             n.x = n.home.x;
             n.y = n.home.y;
@@ -1654,12 +1987,27 @@ function buildActivityGraph(host) {
                 <stop offset="0%" stop-color="#e3b341"/>
                 <stop offset="100%" stop-color="#a8871d"/>
             </radialGradient>
+            <radialGradient id="${uid}-push" cx="35%" cy="35%" r="80%">
+                <stop offset="0%" stop-color="#3fb950"/>
+                <stop offset="100%" stop-color="#238636"/>
+            </radialGradient>
+            <radialGradient id="${uid}-star" cx="35%" cy="35%" r="80%">
+                <stop offset="0%" stop-color="#f0b429"/>
+                <stop offset="100%" stop-color="#b08c1d"/>
+            </radialGradient>
+            <radialGradient id="${uid}-fork" cx="35%" cy="35%" r="80%">
+                <stop offset="0%" stop-color="#39c5cf"/>
+                <stop offset="100%" stop-color="#1b7d83"/>
+            </radialGradient>
             <clipPath id="${uid}-clip"><circle cx="0" cy="0" r="29"/></clipPath>
         </defs>
         <circle class="graph-guide" cx="${cx}" cy="${cy}" r="${ringR}"/>
         <circle class="graph-guide" cx="${cx}" cy="${cy}" r="${ringR + 96}"/>
         <g class="graph-edges"></g>
         <g class="graph-nodes"></g>`;
+
+    /* dense mode: hide labels until hover so big maps stay readable */
+    if (fullscreen && nodes.length > 40) svg.classList.add("graph-mode-dense");
 
     const edgesG = svg.querySelector(".graph-edges");
     const nodesG = svg.querySelector(".graph-nodes");
@@ -1710,7 +2058,8 @@ function buildActivityGraph(host) {
                     ${pill(n.label.split("/").pop(), 38)}
                 </g>`;
         } else {
-            const fill = n.kind === "pr" ? `url(#${uid}-pr)` : `url(#${uid}-issue)`;
+            const fillMap = { pr: `${uid}-pr`, issue: `${uid}-issue`, push: `${uid}-push`, star: `${uid}-star`, fork: `${uid}-fork` };
+            const fill = `url(#${fillMap[n.kind] || `${uid}-issue`})`;
             inner = `
                 <g class="graph-node-scale">
                     <circle class="graph-node-circle" r="11" fill="${fill}"/>
@@ -1747,12 +2096,18 @@ function buildActivityGraph(host) {
     /* ---- legend ---- */
     const legend = document.createElement("div");
     legend.setAttribute("class", "graph-legend");
+    const legendItems = [
+        { c: "linear-gradient(135deg,#c084fc,#7c3aed)", t: `<b>${escapeHtml(profile.login)}</b>`, show: true },
+        { c: "linear-gradient(135deg,#58a6ff,#1f6feb)", t: `Repositories <b>${repoNodes.length}</b>`, show: true },
+        { c: "linear-gradient(135deg,#c084fc,#8957e5)", t: `Pull requests <b>${prCount}</b>`, show: prCount > 0 },
+        { c: "linear-gradient(135deg,#e3b341,#a8871d)", t: `Issues <b>${issueCount}</b>`, show: issueCount > 0 },
+        { c: "linear-gradient(135deg,#3fb950,#238636)", t: `Pushes <b>${pushCount}</b>`, show: pushCount > 0 },
+        { c: "linear-gradient(135deg,#f0b429,#b08c1d)", t: `Stars <b>${starCount}</b>`, show: starCount > 0 },
+        { c: "linear-gradient(135deg,#39c5cf,#1b7d83)", t: `Forks <b>${forkCount}</b>`, show: forkCount > 0 },
+    ].filter((i) => i.show);
     legend.innerHTML = `
-        <span class="graph-legend-item"><i class="graph-legend-dot" style="background:linear-gradient(135deg,#c084fc,#7c3aed)"></i><b>${escapeHtml(profile.login)}</b></span>
-        <span class="graph-legend-item"><i class="graph-legend-dot" style="background:linear-gradient(135deg,#58a6ff,#1f6feb)"></i>Repositories <b>${repos.length}</b></span>
-        <span class="graph-legend-item"><i class="graph-legend-dot" style="background:linear-gradient(135deg,#c084fc,#8957e5)"></i>Pull requests <b>${prCount}</b></span>
-        <span class="graph-legend-item"><i class="graph-legend-dot" style="background:linear-gradient(135deg,#e3b341,#a8871d)"></i>Issues <b>${issueCount}</b></span>
-        <span class="graph-legend-hint">Drag to explore · click to open · hover to trace</span>`;
+        ${legendItems.map((i) => `<span class="graph-legend-item"><i class="graph-legend-dot" style="background:${i.c}"></i>${i.t}</span>`).join("")}
+        <span class="graph-legend-hint">${fullscreen ? "Esc to close · " : ""}Drag to explore · click to open · hover to trace</span>`;
 
     host.innerHTML = "";
     host.appendChild(svg);
@@ -1891,7 +2246,50 @@ function buildActivityGraph(host) {
             window.removeEventListener("resize", onResize);
             return;
         }
-        buildActivityGraph(host);
+        buildActivityGraph(host, { fullscreen });
     };
     window.addEventListener("resize", onResize);
+}
+
+/* open the full activity map in its own fullscreen window */
+function openActivityGraph() {
+    const data = window.__lastResult?.data;
+    if (!data || data.type !== "user" || !data.profile) return;
+    if (document.querySelector(".graph-modal")) return;
+
+    const backdrop = document.createElement("div");
+    backdrop.setAttribute("class", "graph-modal-backdrop");
+    backdrop.innerHTML = `
+        <div class="graph-modal" role="dialog" aria-modal="true" aria-label="Activity map for ${escapeHtml(data.profile.login)}">
+            <header class="graph-modal-header">
+                <div class="graph-modal-title">
+                    <h3>Activity Map <span>@${escapeHtml(data.profile.login)}</span></h3>
+                    <small>Drag to explore · click a node to open · hover to trace connections</small>
+                </div>
+                <button type="button" class="graph-modal-close" aria-label="Close">&times;</button>
+            </header>
+            <div class="graph-host graph-modal-body" data-graph-host></div>
+        </div>`;
+    document.body.appendChild(backdrop);
+
+    const close = () => {
+        if (window.__graphLoop) {
+            cancelAnimationFrame(window.__graphLoop);
+            window.__graphLoop = null;
+        }
+        document.removeEventListener("keydown", onKey);
+        backdrop.remove();
+        document.body.style.overflow = "";
+    };
+    const onKey = (e) => {
+        if (e.key === "Escape") close();
+    };
+    document.addEventListener("keydown", onKey);
+    backdrop.addEventListener("pointerdown", (e) => {
+        if (e.target === backdrop) close();
+    });
+    backdrop.querySelector(".graph-modal-close").addEventListener("click", close);
+    document.body.style.overflow = "hidden";
+
+    buildActivityGraph(backdrop.querySelector("[data-graph-host]"), { fullscreen: true });
 }

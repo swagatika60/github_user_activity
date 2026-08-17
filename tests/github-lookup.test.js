@@ -28,6 +28,7 @@ function mockGitHub(routes) {
                 "x-ratelimit-reset": "0",
             }),
             json: async () => route.body,
+            text: async () => (typeof route.body === "string" ? route.body : JSON.stringify(route.body)),
         };
     };
 }
@@ -46,11 +47,16 @@ test("lookupUser returns the profile, events, repos, languages and contributions
                 { id: "2", type: "PullRequestEvent", created_at: now, repo: { name: "alice/y" }, payload: { action: "opened" } },
             ],
         },
+        "/users/alice/events?per_page=100&page=2": { body: [] },
+        "/users/alice/events?per_page=100&page=3": { body: [] },
         "/users/alice/repos?per_page=100&sort=updated": {
             body: [
                 { name: "x", full_name: "alice/x", description: null, language: "JavaScript", stargazers_count: 3, forks_count: 1, fork: false, html_url: "https://github.com/alice/x", updated_at: now, topics: [] },
                 { name: "y", full_name: "alice/y", description: null, language: "JavaScript", stargazers_count: 1, forks_count: 0, fork: false, html_url: "https://github.com/alice/y", updated_at: now, topics: [] },
             ],
+        },
+        "https://github.com/users/alice/contributions": {
+            body: '<rect data-count="2" data-date="2024-01-15"/>',
         },
     });
 
@@ -63,7 +69,9 @@ test("lookupUser returns the profile, events, repos, languages and contributions
     assert.strictEqual(result.repoCount, 2);
     assert.strictEqual(result.repos[0].stargazers_count, 3);
     assert.deepStrictEqual(result.languages[0], { name: "JavaScript", count: 2, percentage: 100 });
-    assert.strictEqual(result.contributions.length, 196);
+    assert.strictEqual(result.contributions.length, 365);
+    assert.strictEqual(result.eventCount, 2);
+    assert.strictEqual(result.activityGraph.byDay.length, 90);
     assert.strictEqual(result.activityGraph.totals.commits, 2);
     assert.strictEqual(result.activityGraph.totals.prs, 1);
     assert.strictEqual(result.cached, false);
@@ -75,18 +83,23 @@ test("lookupUser serves the second call from cache", async () => {
     mockGitHub({
         "/users/cacheduser": { body: { login: "cacheduser" } },
         "/users/cacheduser/events?per_page=100": { body: [] },
+        "/users/cacheduser/events?per_page=100&page=2": { body: [] },
+        "/users/cacheduser/events?per_page=100&page=3": { body: [] },
         "/users/cacheduser/repos?per_page=100&sort=updated": { body: [] },
+        "https://github.com/users/cacheduser/contributions": {
+            body: '<rect data-count="1" data-date="2024-01-15"/>',
+        },
     });
 
     await github.lookupUser("cacheduser");
     const second = await github.lookupUser("cacheduser");
 
     assert.strictEqual(second.cached, true);
-    // First call makes one request per endpoint (profile, events, repos); the
-    // second call makes none because everything is served from cache.
+    // First call makes one request per endpoint (profile, 3 event pages, repos,
+    // contributions page); the second call makes none — all served from cache.
     const profileCalls = requests.filter((r) => r.path === "/users/cacheduser");
     assert.strictEqual(profileCalls.length, 1);
-    assert.strictEqual(requests.length, 3);
+    assert.strictEqual(requests.length, 6);
 });
 
 test("lookupActivity returns events for a username", async () => {
@@ -158,6 +171,8 @@ test("404 responses surface the not-found error", async () => {
     mockGitHub({
         "/users/ghost": { status: 404, body: {} },
         "/users/ghost/events?per_page=100": { status: 404, body: {} },
+        "/users/ghost/events?per_page=100&page=2": { status: 404, body: {} },
+        "/users/ghost/events?per_page=100&page=3": { status: 404, body: {} },
         "/users/ghost/repos?per_page=100&sort=updated": { status: 404, body: {} },
     });
 
