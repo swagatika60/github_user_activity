@@ -1997,13 +1997,204 @@ body {
 .tree-section {
     margin-top: 18px;
     animation: fadeInUp 0.4s ease both;
-}@media (prefers-reduced-motion: reduce) {
+}/* ===========================================================================
+   Animations & modern motion — aurora, glow, shimmer, stagger, count-up
+   =========================================================================== */
+
+body {
+    overflow-x: hidden;
+}
+
+/* Floating aurora blobs behind the app */
+body::before,
+body::after {
+    content: "";
+    position: fixed;
+    border-radius: 50%;
+    filter: blur(90px);
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.5;
+}
+
+body::before {
+    width: 540px;
+    height: 540px;
+    top: -160px;
+    left: -140px;
+    background: radial-gradient(circle, rgba(88, 166, 255, 0.4), transparent 70%);
+    animation: auroraFloat 22s ease-in-out infinite alternate;
+}
+
+body::after {
+    width: 480px;
+    height: 480px;
+    bottom: -140px;
+    right: -120px;
+    background: radial-gradient(circle, rgba(188, 140, 255, 0.34), transparent 70%);
+    animation: auroraFloat 28s ease-in-out infinite alternate-reverse;
+}
+
+.app {
+    position: relative;
+    z-index: 1;
+}
+
+@keyframes auroraFloat {
+    0% {
+        transform: translate(0, 0) scale(1);
+    }
+    50% {
+        transform: translate(70px, 40px) scale(1.14);
+    }
+    100% {
+        transform: translate(-40px, 24px) scale(0.94);
+    }
+}
+
+/* Brand icon glow pulse */
+.brand-icon {
+    animation: iconGlow 4.5s ease-in-out infinite;
+}
+
+@keyframes iconGlow {
+    0%,
+    100% {
+        box-shadow: 0 0 0 0 rgba(88, 166, 255, 0.25);
+    }
+    50% {
+        box-shadow: 0 0 22px 4px rgba(88, 166, 255, 0.35);
+    }
+}
+
+/* Search button breathing glow */
+#search-btn {
+    animation: btnPulse 3.4s ease-in-out infinite;
+}
+
+@keyframes btnPulse {
+    0%,
+    100% {
+        box-shadow: 0 6px 18px rgba(46, 160, 67, 0.28);
+    }
+    50% {
+        box-shadow: 0 8px 30px rgba(46, 160, 67, 0.52);
+    }
+}
+
+/* Feature chips — lift + gradient on hover */
+.feature-chips .chip {
+    transition: transform 0.2s ease, color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.feature-chips .chip:hover {
+    transform: translateY(-2px);
+    color: #ffffff;
+    background: linear-gradient(120deg, rgba(88, 166, 255, 0.22), rgba(188, 140, 255, 0.2));
+    border-color: rgba(88, 166, 255, 0.55);
+}
+
+/* Staggered entrance for repo cards */
+.repo-grid .repo-card:nth-child(1) {
+    animation-delay: 0.03s;
+}
+.repo-grid .repo-card:nth-child(2) {
+    animation-delay: 0.07s;
+}
+.repo-grid .repo-card:nth-child(3) {
+    animation-delay: 0.11s;
+}
+.repo-grid .repo-card:nth-child(4) {
+    animation-delay: 0.15s;
+}
+.repo-grid .repo-card:nth-child(5) {
+    animation-delay: 0.19s;
+}
+.repo-grid .repo-card:nth-child(6) {
+    animation-delay: 0.23s;
+}
+.repo-grid .repo-card:nth-child(7) {
+    animation-delay: 0.27s;
+}
+.repo-grid .repo-card:nth-child(8) {
+    animation-delay: 0.31s;
+}
+.repo-grid .repo-card:nth-child(9) {
+    animation-delay: 0.35s;
+}
+.repo-grid .repo-card:nth-child(10) {
+    animation-delay: 0.39s;
+}
+.repo-grid .repo-card:nth-child(11) {
+    animation-delay: 0.43s;
+}
+.repo-grid .repo-card:nth-child(12) {
+    animation-delay: 0.47s;
+}
+
+/* Shimmer sweep across repo cards on hover */
+.repo-card {
+    position: relative;
+    overflow: hidden;
+}
+
+.repo-card::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: -160%;
+    width: 60%;
+    height: 100%;
+    background: linear-gradient(105deg, transparent, rgba(255, 255, 255, 0.07), transparent);
+    transform: skewX(-20deg);
+    pointer-events: none;
+}
+
+.repo-card:hover::after {
+    animation: shimmerSweep 0.9s ease;
+}
+
+@keyframes shimmerSweep {
+    from {
+        left: -160%;
+    }
+    to {
+        left: 170%;
+    }
+}
+
+/* Spinner glow while loading */
+.loading-state .spinner {
+    box-shadow: 0 0 26px rgba(88, 166, 255, 0.35);
+}
+
+/* Online status dot glow */
+.status-dot.online {
+    animation: dotGlow 2.2s ease-in-out infinite;
+}
+
+@keyframes dotGlow {
+    0%,
+    100% {
+        box-shadow: 0 0 0 0 rgba(46, 160, 67, 0.45);
+    }
+    50% {
+        box-shadow: 0 0 9px 2px rgba(46, 160, 67, 0.5);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
     .detail-card,
     .repo-card,
     .flow-step,
     .starred-section,
     .tree-section,
-    .lang-bar-fill {
+    .lang-bar-fill,
+    body::before,
+    body::after,
+    .brand-icon,
+    #search-btn,
+    .status-dot.online {
         animation: none;
     }
 }

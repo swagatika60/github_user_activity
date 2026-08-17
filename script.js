@@ -313,7 +313,28 @@ function truncateText(text, maxLength = 280) {
 }
 
 function renderStat(label, value) {
-    return `<div class="stat"><span class="stat-value">${value}</span><span class="stat-label">${label}</span></div>`;
+    const numeric = typeof value === "number" && Number.isFinite(value);
+    return `<div class="stat"><span class="stat-value" ${numeric ? `data-count="${value}"` : ""}>${value}</span><span class="stat-label">${label}</span></div>`;
+}
+
+// Animate numeric .stat-value elements up to their target (eased count-up).
+function animateStats(container) {
+    if (!container) return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    container.querySelectorAll(".stat-value[data-count]").forEach((el) => {
+        const target = Number(el.dataset.count);
+        if (!Number.isFinite(target)) return;
+        const duration = 700;
+        const start = performance.now();
+        const tick = (now) => {
+            const progress = Math.min(1, (now - start) / duration);
+            const eased = 1 - Math.pow(1 - progress, 3);
+            el.textContent = Math.round(target * eased).toLocaleString();
+            if (progress < 1) requestAnimationFrame(tick);
+            else el.textContent = target.toLocaleString();
+        };
+        requestAnimationFrame(tick);
+    });
 }
 
 function renderDetailRow(label, value) {
@@ -867,6 +888,7 @@ async function getActivity() {
         }
 
         output.innerHTML = html;
+        animateStats(output);
     } catch (error) {
         showError(error.message);
         updateRateLimitFooter(null);
@@ -1007,6 +1029,7 @@ async function runCompare() {
         if (!response.ok) throw new Error(data.error || "Compare failed");
         window.__lastResult = { query: `${a} vs ${b}`, data, isCompare: true };
         resultEl.innerHTML = renderCompare(data);
+        animateStats(resultEl);
         updateRateLimitFooter(data.rateLimit);
     } catch (error) {
         resultEl.innerHTML = `<div class="error-message">${escapeHtml(error.message)}</div>`;
