@@ -11,8 +11,10 @@ const realFetch = global.fetch;
 let capturedHeaders = null;
 
 before(() => {
-    global.fetch = async (_url, options = {}) => {
+    global.fetch = async (url, options = {}) => {
         capturedHeaders = options.headers || {};
+        // lookupRepo also fetches open issues + pulls; return arrays for those
+        const isList = String(url).includes("/issues?state=open") || String(url).includes("/pulls?state=open");
         return {
             ok: true,
             status: 200,
@@ -21,7 +23,7 @@ before(() => {
                 "x-ratelimit-limit": "5000",
                 "x-ratelimit-reset": "0",
             }),
-            json: async () => ({ full_name: "acme/widgets", stargazers_count: 1 }),
+            json: async () => (isList ? [] : { full_name: "acme/widgets", stargazers_count: 1 }),
         };
     };
 });

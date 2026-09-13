@@ -549,6 +549,134 @@ function renderActivityList(events, title) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Developer vibe — a fun personality card built from real stats      *
+ * ------------------------------------------------------------------ */
+const VIBE_LINES = [
+    "Sneaks commits in at 3 AM. No one knows why.",
+    "Refactors on Fridays. Lives dangerously.",
+    "Names variables like 'data2', 'final_v3', 'actually_final'.",
+    "Has 47 tabs open — 3 of them are Stack Overflow.",
+    "Writes code, then writes code explaining the code.",
+    "Prettier has saved their marriage.",
+    "Believes the answer to every question is 'it depends'.",
+    "Debugs by adding console.log('here'). Moves it 6 times.",
+    "Ships it first, asks questions never.",
+    "Their git history is 90% 'fix typo'.",
+    "Initiates merge conflicts just to feel something.",
+    "Has shaved more yaks than a Himalayan barbershop.",
+    "Writes TODO comments that are 3 years old and counting.",
+    "Explains code with 'trust me' and a wink.",
+    "Their commit messages read like a diary of regret.",
+    "Closes issues with 'works on my machine'.",
+    "Uses 12 spaces of indentation in private.",
+    "Brings a laptop to meetings 'just in case'.",
+];
+
+const VIBE_LANG_TITLES = {
+    JavaScript: "Script Wizard",
+    TypeScript: "Type Tamer",
+    Python: "Serpent Wrangler",
+    C: "C Veteran",
+    "C++": "Pointer Juggler",
+    Java: "Coffee Engineer",
+    Go: "Gopher Whisperer",
+    Rust: "Borrow-Checker Survivor",
+    Ruby: "Gem Miner",
+    PHP: "LAMP Legend",
+    Swift: "Apple Alchemist",
+    Kotlin: "JVM Jedi",
+    HTML: "Layout Lord",
+    CSS: "Pixel Perfectionist",
+    Shell: "Terminal Titan",
+    Dart: "Flutterer",
+    Lua: "Script Sprite",
+    Vue: "Nuxt Navigator",
+    "C#": "DotNet Defender",
+};
+
+const VIBE_TIERS = [
+    { min: 100000, emoji: "🌌", name: "Galactic" },
+    { min: 10000, emoji: "⭐", name: "Legendary" },
+    { min: 1000, emoji: "🚀", name: "Renowned" },
+    { min: 100, emoji: "👾", name: "Rising" },
+    { min: 0, emoji: "🌱", name: "Curious" },
+];
+
+function pickVibeLine() {
+    return VIBE_LINES[Math.floor(Math.random() * VIBE_LINES.length)];
+}
+
+function devVibe(data) {
+    const p = data.profile || {};
+    const repos = data.repos || [];
+    const totalStars = repos.reduce((s, r) => s + (r.stargazers_count || 0), 0);
+    const lang = data.languages?.[0]?.name || "";
+    const commits = data.activityGraph?.totals?.commits || 0;
+    const followers = p.followers || 0;
+
+    let emoji = "👾";
+    let title = "Code Sorcerer";
+
+    /* famous-users easter eggs */
+    if (p.login === "torvalds") {
+        emoji = "🐧";
+        title = "The Linux Godfather";
+    } else if (p.login === "gaearon") {
+        emoji = "⚛️";
+        title = "React's Redux Whisperer";
+    } else if (followers === 0 && totalStars === 0 && !commits) {
+        emoji = "🌱";
+        title = "Fresh Newcomer";
+    } else {
+        const tier = VIBE_TIERS.find((t) => totalStars >= t.min) || VIBE_TIERS[VIBE_TIERS.length - 1];
+        emoji = tier.emoji;
+        title = `${tier.name} ${VIBE_LANG_TITLES[lang] || "Code Sorcerer"}`;
+    }
+
+    const power = Math.min(999999, Math.round(followers * 50 + totalStars * 3 + commits * 10 + (p.public_repos || 0) * 25));
+    const percent = Math.min(100, Math.max(3, Math.round((power / 20000) * 100)));
+
+    return {
+        emoji,
+        title,
+        power: power.toLocaleString(),
+        percent,
+        line: pickVibeLine(),
+        repos: repos.length,
+        stars: totalStars.toLocaleString(),
+        commits: commits.toLocaleString(),
+        followers: followers.toLocaleString(),
+        lang,
+    };
+}
+
+function renderVibeCard(data) {
+    const vibe = devVibe(data);
+    return `
+        <div class="detail-card vibe-card">
+            <div class="vibe-head">
+                <span class="vibe-emoji">${vibe.emoji}</span>
+                <div class="vibe-titles">
+                    <span class="vibe-label">Developer vibe</span>
+                    <h3 class="vibe-title">${escapeHtml(vibe.title)}</h3>
+                </div>
+                <button type="button" class="vibe-reroll" data-action="vibe-reroll" title="Reroll the vibe">🎲</button>
+            </div>
+            <div class="vibe-power">
+                <span class="vibe-power-label">Power Level <b>${vibe.power}</b></span>
+                <div class="vibe-meter"><div class="vibe-meter-fill" style="width:${vibe.percent}%"></div></div>
+            </div>
+            <p class="vibe-line" data-vibe-line>“${escapeHtml(vibe.line)}”</p>
+            <div class="vibe-stats">
+                <span>📦 ${vibe.repos} repos</span>
+                <span>⭐ ${vibe.stars} stars</span>
+                <span>📝 ${vibe.commits} commits</span>
+                <span>👥 ${vibe.followers} followers</span>
+            </div>
+        </div>`;
+}
+
+/* ------------------------------------------------------------------ *
  * Issues & PRs triage — open items grouped by how much attention
  * they need: red (7+ days) · yellow (2–7 days) · green (< 2 days)   *
  * ------------------------------------------------------------------ */
@@ -639,15 +767,69 @@ function renderTriageItem(item) {
             : "";
     const author = item.author ? ` · by <b>@${escapeHtml(item.author)}</b>` : "";
     const comments = item.comments ? ` · <b>${item.comments}</b> comment${item.comments === 1 ? "" : "s"}` : "";
+    const labels = item.labels?.length
+        ? ` · ${item.labels.map((l) => `<span class="label-tag">${escapeHtml(l)}</span>`).join(" ")}`
+        : "";
     return `
         <a class="triage-item" href="${item.url}" target="_blank" rel="noopener">
             ${badge}
             <span class="triage-item-body">
                 <span class="triage-item-title">${escapeHtml(title)}</span>
-                <span class="triage-item-meta">${refs}opened ${timeAgo(item.created_at)}${author}${comments}</span>
+                <span class="triage-item-meta">${refs}opened ${timeAgo(item.created_at)}${author}${comments}${labels}</span>
             </span>
             <span class="triage-item-num">#${item.number}</span>
         </a>`;
+}
+
+/* triage for a repo search — same blocks, fed by the repo's open issues/PRs */
+const TRIAGE_BLOCKS = [
+    { key: "attention", label: "Attention needed", icon: "🔴", color: "var(--color-red, #e74c3c)", desc: "Waiting 7+ days — may be stale or blocked" },
+    { key: "middle", label: "Needs review", icon: "🟡", color: "var(--color-yellow, #f1c40f)", desc: "2–7 days old — review soon" },
+    { key: "recent", label: "Recent", icon: "🟢", color: "var(--color-green, #2ecc71)", desc: "Fresh — opened less than 2 days ago" },
+];
+
+function renderRepoTriage(issues) {
+    const all = (issues || []).map((i) => ({
+        kind: i.isPr ? "pr" : "issue",
+        number: i.number,
+        title: i.title || "",
+        state: i.state || "open",
+        created_at: i.created_at,
+        closed_at: i.closed_at,
+        url: i.html_url,
+        comments: i.comments || 0,
+        author: i.user || "",
+        labels: i.labels || [],
+        repo: "",
+    }));
+
+    if (!all.length) {
+        return `
+            <h3 class="section-title">Issues &amp; Pull requests</h3>
+            <div class="empty-state">No open issues or pull requests — all clear 🎉</div>`;
+    }
+
+    const prCount = all.filter((i) => i.kind === "pr").length;
+    const openCount = all.filter((i) => triagePriority(i) !== null).length;
+
+    return `
+        <h3 class="section-title">Issues &amp; Pull requests <span class="count-badge">${prCount} PRs · ${all.length - prCount} issues</span></h3>
+        <p class="triage-intro">${openCount} open item${openCount === 1 ? "" : "s"} grouped by how long they've been waiting — click to open the exact page.</p>
+        ${TRIAGE_BLOCKS.map((block) => {
+            const items = all.filter((item) => triagePriority(item) === block.key);
+            const shown = items.slice(0, 10);
+            const more = items.length - shown.length;
+            return `
+                <div class="triage-block" style="--triage-color:${block.color}">
+                    <div class="triage-block-head">
+                        <span class="triage-block-icon">${block.icon}</span>
+                        <h4>${block.label}</h4>
+                        <span class="count-badge">${items.length}</span>
+                    </div>
+                    <p class="triage-block-desc">${block.desc}</p>
+                    ${shown.length ? `<div class="triage-list">${shown.map(renderTriageItem).join("")}${more ? `<p class="triage-more">+ ${more} more…</p>` : ""}</div>` : '<div class="triage-empty">Nothing here — all clear 🎉</div>'}
+                </div>`;
+        }).join("")}`;
 }
 
 function renderTriage(events) {
@@ -660,30 +842,7 @@ function renderTriage(events) {
             <div class="empty-state">No pull requests or issues found in recent activity.</div>`;
     }
 
-    const blocks = [
-        {
-            key: "attention",
-            label: "Needs attention",
-            color: "#f85149",
-            icon: "🔴",
-            desc: "Open PRs & issues waiting 7+ days — review or reply to these first.",
-        },
-        {
-            key: "middle",
-            label: "Middle",
-            color: "#d29922",
-            icon: "🟡",
-            desc: "Open items from the last week — keep them moving.",
-        },
-        {
-            key: "recent",
-            label: "Recent",
-            color: "#2ea043",
-            icon: "🟢",
-            desc: "Fresh items from the last 48 hours — the newest activity.",
-        },
-    ];
-
+    const blocks = TRIAGE_BLOCKS;
     const closed = all.filter((item) => triagePriority(item) === null);
 
     return `
@@ -765,7 +924,8 @@ function renderUser(data) {
             ${renderDetailRow("Location", escapeHtml(user.location || "—"))}
             ${renderDetailRow("Joined", formatDate(user.created_at))}
             ${renderDetailRow("Profile", `<a href="${profileUrl}" target="_blank" rel="noopener" class="repo-link">${profileUrl}</a>`)}
-        </div>`;
+        </div>
+        ${renderVibeCard(data)}`;
 
     const tabs = [
         { key: "overview", label: "Overview", body: overview },
@@ -852,6 +1012,7 @@ function renderRepo(data) {
                 <span class="detail-value topic-list">${topics}</span>
             </div>
         </div>
+        ${data.issues ? renderRepoTriage(data.issues) : ""}
     `;
 }
 
@@ -1499,10 +1660,11 @@ async function loadRepoTree(btn) {
         if (!response.ok) throw new Error(data.error || "Failed to load file tree");
         const section = document.createElement("div");
         section.className = "tree-section";
+        const treeBase = `https://github.com/${data.owner}/${data.repo}`;
         section.innerHTML = `
             <h3 class="section-title">File tree <span class="count-badge">${data.tree.length} items</span></h3>
             ${data.truncated ? `<p class="detail-muted">Large repository — showing the first ${data.tree.length} paths (${escapeHtml(data.branch)} branch).</p>` : ""}
-            <div class="repo-tree">${buildTreeHtml(data.tree)}</div>`;
+            <div class="repo-tree">${buildTreeHtml(data.tree, 250, treeBase, data.branch)}</div>`;
         toolbar.insertAdjacentElement("afterend", section);
         section.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (error) {
@@ -1526,8 +1688,12 @@ function treeFileIcon(name) {
     return "📄";
 }
 
-function buildTreeHtml(paths, cap = 250) {
+function buildTreeHtml(paths, cap = 250, base = "", branch = "main") {
     const root = { dirs: new Map(), files: [] };
+    const encBranch = encodeURIComponent(branch);
+    const fileHref = (path) => `${base}/blob/${encBranch}/${encodeURI(path)}`;
+    const dirHref = (path) => `${base}/tree/${encBranch}/${encodeURI(path)}`;
+
     let count = 0;
     for (const node of paths || []) {
         if (count >= cap) break;
@@ -1549,30 +1715,30 @@ function buildTreeHtml(paths, cap = 250) {
         count += 1;
     }
 
-    const renderNode = (name, node) => {
+    const renderNode = (name, node, dirPath) => {
         const dirs = [...node.dirs.entries()]
             .sort(([x], [y]) => x.localeCompare(y))
-            .map(([n, child]) => renderNode(n, child))
+            .map(([n, child]) => renderNode(n, child, dirPath ? `${dirPath}/${n}` : n))
             .join("");
         const files = node.files
             .sort((x, y) => x.name.localeCompare(y.name))
             .map(
                 (f) =>
-                    `<div class="tree-file" title="${escapeHtml(f.path)}${f.size ? ` · ${f.size} bytes` : ""}"><span class="tree-icon">${treeFileIcon(f.name)}</span>${escapeHtml(f.name)}</div>`
+                    `<a class="tree-file" href="${fileHref(f.path)}" target="_blank" rel="noopener" title="${escapeHtml(f.path)}${f.size ? ` · ${f.size} bytes` : ""}"><span class="tree-icon">${treeFileIcon(f.name)}</span>${escapeHtml(f.name)}</a>`
             )
             .join("");
-        return `<details class="tree-dir" open><summary><span class="tree-icon">📁</span>${escapeHtml(name)}</summary>${dirs}${files}</details>`;
+        return `<details class="tree-dir" open><summary><a class="tree-dir-link" href="${dirHref(dirPath)}" target="_blank" rel="noopener" title="${escapeHtml(dirPath)}"><span class="tree-icon">📁</span>${escapeHtml(name)}</a></summary>${dirs}${files}</details>`;
     };
 
     const dirs = [...root.dirs.entries()]
         .sort(([x], [y]) => x.localeCompare(y))
-        .map(([n, child]) => renderNode(n, child))
+        .map(([n, child]) => renderNode(n, child, n))
         .join("");
     const files = root.files
         .sort((x, y) => x.name.localeCompare(y.name))
         .map(
             (f) =>
-                `<div class="tree-file" title="${escapeHtml(f.path)}${f.size ? ` · ${f.size} bytes` : ""}"><span class="tree-icon">${treeFileIcon(f.name)}</span>${escapeHtml(f.name)}</div>`
+                `<a class="tree-file" href="${fileHref(f.path)}" target="_blank" rel="noopener" title="${escapeHtml(f.path)}${f.size ? ` · ${f.size} bytes` : ""}"><span class="tree-icon">${treeFileIcon(f.name)}</span>${escapeHtml(f.name)}</a>`
         )
         .join("");
     return dirs + files || '<div class="empty-state">No files found.</div>';
@@ -1700,6 +1866,11 @@ function handleOutputClick(event) {
         else if (action === "compare") openCompare(result);
         else if (action === "tree") loadRepoTree(actionBtn);
         else if (action === "graph-fullscreen") openActivityGraph();
+        else if (action === "vibe-reroll") {
+            const card = actionBtn.closest(".vibe-card");
+            const line = card?.querySelector("[data-vibe-line]");
+            if (line) line.textContent = `“${pickVibeLine()}”`;
+        }
         return;
     }
 

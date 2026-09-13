@@ -115,9 +115,18 @@ test("lookupActivity returns events for a username", async () => {
     assert.strictEqual(result.cached, false);
 });
 
-test("lookupRepo returns repository details", async () => {
+test("lookupRepo returns repository details plus open issues and PRs", async () => {
     mockGitHub({
         "/repos/acme/widgets": { body: { full_name: "acme/widgets", stargazers_count: 10, language: "Go" } },
+        "/repos/acme/widgets/issues?state=open&per_page=30&sort=created&direction=asc": {
+            body: [
+                { number: 1, title: "Bug", state: "open", created_at: "2026-01-01T00:00:00Z", comments: 2, user: { login: "alice" }, labels: [{ name: "bug" }] },
+                { number: 2, title: "PR inside issues", state: "open", created_at: "2026-01-02T00:00:00Z", pull_request: {} },
+            ],
+        },
+        "/repos/acme/widgets/pulls?state=open&per_page=30&sort=created&direction=asc": {
+            body: [{ number: 2, title: "PR inside issues", state: "open", created_at: "2026-01-02T00:00:00Z" }],
+        },
     });
 
     const result = await github.lookupRepo("acme", "widgets");
@@ -125,6 +134,12 @@ test("lookupRepo returns repository details", async () => {
     assert.strictEqual(result.type, "repo");
     assert.strictEqual(result.repo.full_name, "acme/widgets");
     assert.strictEqual(result.repo.stargazers_count, 10);
+    assert.strictEqual(result.issues.length, 2);
+    assert.strictEqual(result.prCount, 1);
+    assert.strictEqual(result.issueCount, 1);
+    assert.strictEqual(result.issues[0].isPr, undefined);
+    assert.strictEqual(result.issues[1].isPr, true);
+    assert.deepStrictEqual(result.issues[0].labels, ["bug"]);
     assert.strictEqual(result.rateLimit.remaining, 4999);
 });
 
@@ -199,11 +214,13 @@ test("403 responses surface the rate limit error with remaining quota", async ()
 test("requests carry Accept and User-Agent and no token by default", async () => {
     mockGitHub({
         "/repos/headers/check": { body: { full_name: "headers/check" } },
+        "/repos/headers/check/issues?state=open&per_page=30&sort=created&direction=asc": { body: [] },
+        "/repos/headers/check/pulls?state=open&per_page=30&sort=created&direction=asc": { body: [] },
     });
 
     await github.lookupRepo("headers", "check");
 
-    assert.strictEqual(requests.length, 1);
+    assert.strictEqual(requests.length, 3);
     assert.strictEqual(requests[0].path, "/repos/headers/check");
     assert.strictEqual(requests[0].headers.Accept, "application/vnd.github+json");
     assert.strictEqual(requests[0].headers["User-Agent"], "Github-User-Activity-App");
